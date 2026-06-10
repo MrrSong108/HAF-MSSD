@@ -22,13 +22,10 @@ np.random.seed(SEED)
 
 print("XGBoost version:", xgb.__version__)
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed/traff"))
+DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/xgboost"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# For public code, CPU is safer as the default.
-# If GPU is available, run:
-#   XGBOOST_DEVICE=cuda python train_xgboost_public.py
 XGBOOST_DEVICE = os.getenv("XGBOOST_DEVICE", "cpu")
 XGBOOST_N_JOBS = int(os.getenv("XGBOOST_N_JOBS", "8"))
 
@@ -113,8 +110,6 @@ def objective(trial):
         "random_state": SEED,
         "verbosity": 0,
 
-        # XGBoost 2.x recommended setting.
-        # Use XGBOOST_DEVICE=cuda to enable GPU training if available.
         "tree_method": "hist",
         "device": XGBOOST_DEVICE,
 
@@ -131,7 +126,6 @@ def objective(trial):
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-6, 10.0, log=True),
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-6, 10.0, log=True),
 
-        # Avoid excessive resource competition when Optuna also uses parallelism.
         "n_jobs": XGBOOST_N_JOBS,
     }
 
@@ -259,8 +253,6 @@ def compare_values(true_values, predicted_values, threshold=0.1):
     return result
 
 
-# Use 0.1 for 10% error-based classification.
-# Use 0.2 for a 20% sensitivity experiment.
 train_compared = compare_values(y_train_true, y_train_pred, threshold=ERROR_THRESHOLD)
 validation_compared = compare_values(y_validation_true, y_validation_pred, threshold=ERROR_THRESHOLD)
 test_compared = compare_values(y_test_true, y_test_pred, threshold=ERROR_THRESHOLD)

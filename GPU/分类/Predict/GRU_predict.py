@@ -1,3 +1,4 @@
+```python
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -5,6 +6,8 @@ import gc
 import json
 import joblib
 import random
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import optuna
@@ -24,7 +27,7 @@ from sklearn.metrics import mean_squared_error
 
 
 # =========================
-# 1. GPU 设置
+# 1. GPU configuration
 # =========================
 print("TensorFlow version:", tf.__version__)
 
@@ -33,44 +36,54 @@ if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"检测到 GPU 数量: {len(gpus)}")
-        print("GPU 设备:", gpus)
+        print(f"Number of GPUs detected: {len(gpus)}")
+        print("GPU devices:", gpus)
     except RuntimeError as e:
-        print("GPU 设置失败:", e)
+        print("GPU configuration failed:", e)
 else:
-    print("未检测到 GPU，将使用 CPU 运行。")
+    print("No GPU detected. Running on CPU.")
 
 
 # =========================
-# 2. 固定随机种子
+# 2. Basic configuration
 # =========================
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
+DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/gru"))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+ERROR_THRESHOLD = float(os.getenv("ERROR_THRESHOLD", "0.1"))
+
 
 # =========================
-# 3. 数据读取
+# 3. Data loading
 # =========================
 predict_columns = [
-    'predict_T2_0.5', 'predict_T2_1', 'predict_T2_1.5', 'predict_T2_2', 'predict_T2_3',
-    'predict_T2_4', 'predict_T2_5', 'predict_T2_6', 'predict_T2_7', 'predict_T2_8',
-    'predict_T2_9', 'predict_T2_10', 'predict_T2_11', 'predict_T2_12', 'predict_T2_13',
-    'predict_T2_14', 'predict_T2_15', 'predict_T2_16', 'predict_T2_17', 'predict_T2_18',
-    'predict_T2_19', 'predict_T2_20', 'predict_T2_21', 'predict_T2_22', 'predict_T2_23',
-    'predict_T2_24',
-    'predict_T3_0.5', 'predict_T3_1', 'predict_T3_1.5', 'predict_T3_2', 'predict_T3_3',
-    'predict_T3_4', 'predict_T3_5', 'predict_T3_6', 'predict_T3_7', 'predict_T3_8',
-    'predict_T3_9', 'predict_T3_10', 'predict_T3_11', 'predict_T3_12', 'predict_T3_13',
-    'predict_T3_14', 'predict_T3_15', 'predict_T3_16', 'predict_T3_17', 'predict_T3_18',
-    'predict_T3_19', 'predict_T3_20', 'predict_T3_21', 'predict_T3_22', 'predict_T3_23',
-    'predict_T3_24'
+    "predict_T2_0.5", "predict_T2_1", "predict_T2_1.5", "predict_T2_2", "predict_T2_3",
+    "predict_T2_4", "predict_T2_5", "predict_T2_6", "predict_T2_7", "predict_T2_8",
+    "predict_T2_9", "predict_T2_10", "predict_T2_11", "predict_T2_12", "predict_T2_13",
+    "predict_T2_14", "predict_T2_15", "predict_T2_16", "predict_T2_17", "predict_T2_18",
+    "predict_T2_19", "predict_T2_20", "predict_T2_21", "predict_T2_22", "predict_T2_23",
+    "predict_T2_24",
+    "predict_T3_0.5", "predict_T3_1", "predict_T3_1.5", "predict_T3_2", "predict_T3_3",
+    "predict_T3_4", "predict_T3_5", "predict_T3_6", "predict_T3_7", "predict_T3_8",
+    "predict_T3_9", "predict_T3_10", "predict_T3_11", "predict_T3_12", "predict_T3_13",
+    "predict_T3_14", "predict_T3_15", "predict_T3_16", "predict_T3_17", "predict_T3_18",
+    "predict_T3_19", "predict_T3_20", "predict_T3_21", "predict_T3_22", "predict_T3_23",
+    "predict_T3_24",
 ]
 
-train_path = "/root/autodl-tmp/airport_project/data/xiao/check/train.csv"
-test_path = "/root/autodl-tmp/airport_project/data/xiao/check/test.csv"
-validation_path = "/root/autodl-tmp/airport_project/data/xiao/check/test.csv"
+train_path = DATA_DIR / "train.csv"
+test_path = DATA_DIR / "test.csv"
+validation_path = DATA_DIR / "validation.csv"
+
+for file_path in [train_path, test_path, validation_path]:
+    if not file_path.exists():
+        raise FileNotFoundError(f"Required data file not found: {file_path}")
 
 train = pd.read_csv(train_path)
 test = pd.read_csv(test_path)
@@ -88,14 +101,14 @@ train_Y = train[target_col]
 test_Y = test[target_col]
 validation_Y = validation[target_col]
 
-print("数据已读取")
-print("训练集特征维度:", features_train.shape)
-print("测试集特征维度:", features_test.shape)
-print("验证集特征维度:", features_validation.shape)
+print("Data loaded successfully.")
+print("Training feature shape:", features_train.shape)
+print("Test feature shape:", features_test.shape)
+print("Validation feature shape:", features_validation.shape)
 
 
 # =========================
-# 4. 归一化
+# 4. Normalization
 # =========================
 scaler_X = MinMaxScaler()
 scaler_y = MinMaxScaler()
@@ -108,20 +121,20 @@ y_train = scaler_y.fit_transform(train_Y.values.reshape(-1, 1))
 y_test = scaler_y.transform(test_Y.values.reshape(-1, 1))
 y_validation = scaler_y.transform(validation_Y.values.reshape(-1, 1))
 
-# GRU 输入格式：[样本数, 时间步长, 特征数]
-# 当前仍然沿用你原来的单时间步输入形式
+# GRU input format: [num_samples, timesteps, num_features]
+# This script uses the original single-time-step input setting.
 X_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
 X_test = X_test.reshape(X_test.shape[0], 1, X_test.shape[1])
 X_validation = X_validation.reshape(X_validation.shape[0], 1, X_validation.shape[1])
 
-print("数据归一化与 reshape 完成")
+print("Data normalization and reshaping completed.")
 print("X_train shape:", X_train.shape)
 print("X_test shape:", X_test.shape)
 print("X_validation shape:", X_validation.shape)
 
 
 # =========================
-# 5. GRU 建模函数
+# 5. GRU model construction function
 # =========================
 def build_model(
     input_shape,
@@ -129,7 +142,7 @@ def build_model(
     gru_units_2,
     dropout_rate,
     learning_rate,
-    l2_reg
+    l2_reg,
 ):
     model = Sequential()
 
@@ -141,7 +154,7 @@ def build_model(
             return_sequences=True,
             kernel_regularizer=l2(l2_reg),
             recurrent_regularizer=l2(l2_reg),
-            input_shape=input_shape
+            input_shape=input_shape,
         )
     )
     model.add(Dropout(dropout_rate))
@@ -152,7 +165,7 @@ def build_model(
             activation="tanh",
             recurrent_activation="sigmoid",
             kernel_regularizer=l2(l2_reg),
-            recurrent_regularizer=l2(l2_reg)
+            recurrent_regularizer=l2(l2_reg),
         )
     )
     model.add(Dropout(dropout_rate))
@@ -163,14 +176,14 @@ def build_model(
 
     model.compile(
         optimizer=optimizer,
-        loss="mean_squared_error"
+        loss="mean_squared_error",
     )
 
     return model
 
 
 # =========================
-# 6. Optuna 目标函数
+# 6. Optuna objective function
 # =========================
 def objective(trial):
     K.clear_session()
@@ -197,14 +210,14 @@ def objective(trial):
         gru_units_2=gru_units_2,
         dropout_rate=dropout_rate,
         learning_rate=learning_rate,
-        l2_reg=l2_reg
+        l2_reg=l2_reg,
     )
 
     early_stopping = EarlyStopping(
         monitor="val_loss",
         patience=patience,
         restore_best_weights=True,
-        verbose=0
+        verbose=0,
     )
 
     model.fit(
@@ -214,7 +227,7 @@ def objective(trial):
         batch_size=batch_size,
         validation_data=(X_validation, y_validation),
         verbose=0,
-        callbacks=[early_stopping]
+        callbacks=[early_stopping],
     )
 
     y_val_scaled = model.predict(X_validation, batch_size=batch_size, verbose=0)
@@ -233,36 +246,35 @@ def objective(trial):
 
 
 # =========================
-# 7. Optuna 调参
+# 7. Hyperparameter optimization with Optuna
 # =========================
 pruner = MedianPruner(
     n_startup_trials=10,
-    n_warmup_steps=5
+    n_warmup_steps=5,
 )
 
 study_gru = optuna.create_study(
     direction="minimize",
-    pruner=pruner
+    pruner=pruner,
 )
 
 study_gru.optimize(
     objective,
     n_trials=50,
-    n_jobs=1
+    n_jobs=1,
 )
 
-print("最优验证集 RMSE:", study_gru.best_value)
-print("最佳超参数:", study_gru.best_params)
+print("Best validation RMSE:", study_gru.best_value)
+print("Best hyperparameters:", study_gru.best_params)
 
 best_params = study_gru.best_params
 
-with open("/root/autodl-tmp/airport_project/data/xiao/check/predict/best_gru_params.json", "w", encoding="utf-8") as f:
-    json.dump(best_params, f, ensure_ascii=False, indent=4)
+with open(OUTPUT_DIR / "best_gru_params.json", "w", encoding="utf-8") as f:
+    json.dump(best_params, f, ensure_ascii=True, indent=4)
 
-# best_params = {'gru_units_1': 128, 'gru_units_2': 64, 'dropout_rate': 0.21689683934126675, 'batch_size': 128, 'learning_rate': 0.000854773950725964, 'l2_reg': 3.708159242351992e-06, 'patience': 11}
 
 # =========================
-# 8. 使用最佳参数重新训练 GRU 模型
+# 8. Retrain GRU model with the best hyperparameters
 # =========================
 K.clear_session()
 gc.collect()
@@ -273,14 +285,14 @@ best_model = build_model(
     gru_units_2=best_params["gru_units_2"],
     dropout_rate=best_params["dropout_rate"],
     learning_rate=best_params["learning_rate"],
-    l2_reg=best_params["l2_reg"]
+    l2_reg=best_params["l2_reg"],
 )
 
 early_stopping = EarlyStopping(
     monitor="val_loss",
     patience=best_params["patience"],
     restore_best_weights=True,
-    verbose=1
+    verbose=1,
 )
 
 history = best_model.fit(
@@ -290,12 +302,12 @@ history = best_model.fit(
     batch_size=best_params["batch_size"],
     validation_data=(X_validation, y_validation),
     verbose=1,
-    callbacks=[early_stopping]
+    callbacks=[early_stopping],
 )
 
 
 # =========================
-# 9. 预测与评估
+# 9. Prediction and evaluation
 # =========================
 def inverse_predict(model, X, batch_size):
     pred_scaled = model.predict(X, batch_size=batch_size, verbose=0)
@@ -315,15 +327,15 @@ train_rmse = np.sqrt(mean_squared_error(y_train_true, y_train_pred))
 validation_rmse = np.sqrt(mean_squared_error(y_validation_true, y_validation_pred))
 test_rmse = np.sqrt(mean_squared_error(y_test_true, y_test_pred))
 
-print("train rmse:", train_rmse)
-print("validation rmse:", validation_rmse)
-print("test rmse:", test_rmse)
+print("Train RMSE:", train_rmse)
+print("Validation RMSE:", validation_rmse)
+print("Test RMSE:", test_rmse)
 
 
 # =========================
-# 10. 误差分类标签生成
+# 10. Error-based classification label generation
 # =========================
-def compare_values(true_values, predicted_values):
+def compare_values(true_values, predicted_values, threshold=0.1):
     result = []
 
     true_values = np.asarray(true_values).reshape(-1)
@@ -337,7 +349,7 @@ def compare_values(true_values, predicted_values):
                 result.append(0)
         else:
             ratio = abs((pred - true) / (true + 1e-8))
-            if ratio > 0.1:
+            if ratio > threshold:
                 result.append(0)
             else:
                 result.append(1)
@@ -345,60 +357,59 @@ def compare_values(true_values, predicted_values):
     return result
 
 
-train_compared = compare_values(y_train_true, y_train_pred)
-validation_compared = compare_values(y_validation_true, y_validation_pred)
-test_compared = compare_values(y_test_true, y_test_pred)
+train_compared = compare_values(y_train_true, y_train_pred, threshold=ERROR_THRESHOLD)
+validation_compared = compare_values(y_validation_true, y_validation_pred, threshold=ERROR_THRESHOLD)
+test_compared = compare_values(y_test_true, y_test_pred, threshold=ERROR_THRESHOLD)
 
 unique, counts = np.unique(train_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-print("训练集类别分布:", distribution)
+print("Training label distribution:", distribution)
 
 unique, counts = np.unique(validation_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-print("验证集类别分布:", distribution)
+print("Validation label distribution:", distribution)
 
 unique, counts = np.unique(test_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-print("测试集类别分布:", distribution)
+print("Test label distribution:", distribution)
 
 
 # =========================
-# 11. 保存模型、归一化器和结果
+# 11. Save model, scalers, and generated results
 # =========================
-save_dir = "/root/autodl-tmp/airport_project/data/xiao/check/predict/gru"
-os.makedirs(save_dir, exist_ok=True)
-
-best_model.save(os.path.join(save_dir, "best_gru_model.keras"))
-joblib.dump(scaler_X, os.path.join(save_dir, "scaler_X.pkl"))
-joblib.dump(scaler_y, os.path.join(save_dir, "scaler_y.pkl"))
+best_model.save(OUTPUT_DIR / "best_gru_model.keras")
+joblib.dump(scaler_X, OUTPUT_DIR / "scaler_X.pkl")
+joblib.dump(scaler_y, OUTPUT_DIR / "scaler_y.pkl")
 
 X_train_data = pd.DataFrame(
     X_train.reshape(X_train.shape[0], X_train.shape[2]),
-    columns=features_train.columns
+    columns=features_train.columns,
 )
 X_train_data["target"] = train_compared
 
 X_validation_data = pd.DataFrame(
     X_validation.reshape(X_validation.shape[0], X_validation.shape[2]),
-    columns=features_validation.columns
+    columns=features_validation.columns,
 )
 X_validation_data["target"] = validation_compared
 
 X_test_data = pd.DataFrame(
     X_test.reshape(X_test.shape[0], X_test.shape[2]),
-    columns=features_test.columns
+    columns=features_test.columns,
 )
 X_test_data["target"] = test_compared
 
-X_train_data.to_csv(os.path.join(save_dir, "classification_train.csv"), index=False)
-X_validation_data.to_csv(os.path.join(save_dir, "classification_validation.csv"), index=False)
-X_test_data.to_csv(os.path.join(save_dir, "classification_test.csv"), index=False)
+X_train_data.to_csv(OUTPUT_DIR / "classification_train.csv", index=False)
+X_validation_data.to_csv(OUTPUT_DIR / "classification_validation.csv", index=False)
+X_test_data.to_csv(OUTPUT_DIR / "classification_test.csv", index=False)
 
-pred_result = pd.DataFrame({
-    "test_true": y_test_true.reshape(-1),
-    "test_pred": y_test_pred.reshape(-1),
-    "test_label": test_compared
-})
-pred_result.to_csv(os.path.join(save_dir, "test_prediction_result.csv"), index=False)
+pred_result = pd.DataFrame(
+    {
+        "test_true": y_test_true.reshape(-1),
+        "test_pred": y_test_pred.reshape(-1),
+        "test_label": test_compared,
+    }
+)
+pred_result.to_csv(OUTPUT_DIR / "test_prediction_result.csv", index=False)
 
-print("模型、归一化器、分类数据和预测结果已保存到:", save_dir)
+print("Model, scalers, classification data, and prediction results saved to:", OUTPUT_DIR)

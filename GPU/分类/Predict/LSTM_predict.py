@@ -5,6 +5,8 @@ import gc
 import json
 import joblib
 import random
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import optuna
@@ -19,7 +21,6 @@ from tensorflow.keras.regularizers import l2
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
-
 
 
 # =========================
@@ -41,38 +42,45 @@ else:
 
 
 # =========================
-# 2. Set random seed
+# 2. Basic configuration
 # =========================
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
+DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/lstm"))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+ERROR_THRESHOLD = float(os.getenv("ERROR_THRESHOLD", "0.1"))
+
 
 # =========================
-# 3. Path and data configuration
+# 3. Data loading
 # =========================
-DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/bilstm"))
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 predict_columns = [
-    'predict_T2_0.5', 'predict_T2_1', 'predict_T2_1.5', 'predict_T2_2', 'predict_T2_3',
-    'predict_T2_4', 'predict_T2_5', 'predict_T2_6', 'predict_T2_7', 'predict_T2_8',
-    'predict_T2_9', 'predict_T2_10', 'predict_T2_11', 'predict_T2_12', 'predict_T2_13',
-    'predict_T2_14', 'predict_T2_15', 'predict_T2_16', 'predict_T2_17', 'predict_T2_18',
-    'predict_T2_19', 'predict_T2_20', 'predict_T2_21', 'predict_T2_22', 'predict_T2_23',
-    'predict_T2_24',
-    'predict_T3_0.5', 'predict_T3_1', 'predict_T3_1.5', 'predict_T3_2', 'predict_T3_3',
-    'predict_T3_4', 'predict_T3_5', 'predict_T3_6', 'predict_T3_7', 'predict_T3_8',
-    'predict_T3_9', 'predict_T3_10', 'predict_T3_11', 'predict_T3_12', 'predict_T3_13',
-    'predict_T3_14', 'predict_T3_15', 'predict_T3_16', 'predict_T3_17', 'predict_T3_18',
-    'predict_T3_19', 'predict_T3_20', 'predict_T3_21', 'predict_T3_22', 'predict_T3_23',
-    'predict_T3_24'
+    "predict_T2_0.5", "predict_T2_1", "predict_T2_1.5", "predict_T2_2", "predict_T2_3",
+    "predict_T2_4", "predict_T2_5", "predict_T2_6", "predict_T2_7", "predict_T2_8",
+    "predict_T2_9", "predict_T2_10", "predict_T2_11", "predict_T2_12", "predict_T2_13",
+    "predict_T2_14", "predict_T2_15", "predict_T2_16", "predict_T2_17", "predict_T2_18",
+    "predict_T2_19", "predict_T2_20", "predict_T2_21", "predict_T2_22", "predict_T2_23",
+    "predict_T2_24",
+    "predict_T3_0.5", "predict_T3_1", "predict_T3_1.5", "predict_T3_2", "predict_T3_3",
+    "predict_T3_4", "predict_T3_5", "predict_T3_6", "predict_T3_7", "predict_T3_8",
+    "predict_T3_9", "predict_T3_10", "predict_T3_11", "predict_T3_12", "predict_T3_13",
+    "predict_T3_14", "predict_T3_15", "predict_T3_16", "predict_T3_17", "predict_T3_18",
+    "predict_T3_19", "predict_T3_20", "predict_T3_21", "predict_T3_22", "predict_T3_23",
+    "predict_T3_24",
 ]
 
 train_path = DATA_DIR / "train.csv"
 test_path = DATA_DIR / "test.csv"
 validation_path = DATA_DIR / "validation.csv"
+
+for file_path in [train_path, test_path, validation_path]:
+    if not file_path.exists():
+        raise FileNotFoundError(f"Required data file not found: {file_path}")
 
 train = pd.read_csv(train_path)
 test = pd.read_csv(test_path)
@@ -110,18 +118,18 @@ y_train = scaler_y.fit_transform(train_Y.values.reshape(-1, 1))
 y_test = scaler_y.transform(test_Y.values.reshape(-1, 1))
 y_validation = scaler_y.transform(validation_Y.values.reshape(-1, 1))
 
-# LSTM 输入格式：[样本数, 时间步长, 特征数]
-# 当前沿用你的原始单时间步输入形式
 X_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
 X_test = X_test.reshape(X_test.shape[0], 1, X_test.shape[1])
 X_validation = X_validation.reshape(X_validation.shape[0], 1, X_validation.shape[1])
 
 print("Data normalization and reshaping completed.")
 print("X_train shape:", X_train.shape)
+print("X_test shape:", X_test.shape)
+print("X_validation shape:", X_validation.shape)
 
 
 # =========================
-# 5. Model construction function
+# 5. LSTM model construction function
 # =========================
 def build_lstm_model(
     input_shape,
@@ -129,7 +137,7 @@ def build_lstm_model(
     lstm_units_2,
     dropout_rate,
     learning_rate,
-    l2_reg
+    l2_reg,
 ):
     model = Sequential()
 
@@ -141,7 +149,7 @@ def build_lstm_model(
             return_sequences=True,
             kernel_regularizer=l2(l2_reg),
             recurrent_regularizer=l2(l2_reg),
-            input_shape=input_shape
+            input_shape=input_shape,
         )
     )
     model.add(Dropout(dropout_rate))
@@ -152,7 +160,7 @@ def build_lstm_model(
             activation="tanh",
             recurrent_activation="sigmoid",
             kernel_regularizer=l2(l2_reg),
-            recurrent_regularizer=l2(l2_reg)
+            recurrent_regularizer=l2(l2_reg),
         )
     )
     model.add(Dropout(dropout_rate))
@@ -163,7 +171,7 @@ def build_lstm_model(
 
     model.compile(
         optimizer=optimizer,
-        loss="mean_squared_error"
+        loss="mean_squared_error",
     )
 
     return model
@@ -197,14 +205,14 @@ def objective(trial):
         lstm_units_2=lstm_units_2,
         dropout_rate=dropout_rate,
         learning_rate=learning_rate,
-        l2_reg=l2_reg
+        l2_reg=l2_reg,
     )
 
     early_stopping = EarlyStopping(
         monitor="val_loss",
         patience=patience,
         restore_best_weights=True,
-        verbose=0
+        verbose=0,
     )
 
     model.fit(
@@ -214,7 +222,7 @@ def objective(trial):
         batch_size=batch_size,
         validation_data=(X_validation, y_validation),
         verbose=0,
-        callbacks=[early_stopping]
+        callbacks=[early_stopping],
     )
 
     y_val_scaled = model.predict(X_validation, batch_size=batch_size, verbose=0)
@@ -240,19 +248,20 @@ study_lstm = optuna.create_study(direction="minimize")
 study_lstm.optimize(
     objective,
     n_trials=50,
-    n_jobs=1
+    n_jobs=1,
 )
 
 print("Best validation RMSE:", study_lstm.best_value)
-print("最佳超参数Best hyperparameters:", study_lstm.best_params)
+print("Best hyperparameters:", study_lstm.best_params)
 
 best_params = study_lstm.best_params
 
 with open(OUTPUT_DIR / "best_lstm_params.json", "w", encoding="utf-8") as f:
-    json.dump(best_params, f, ensure_ascii=False, indent=4)
+    json.dump(best_params, f, ensure_ascii=True, indent=4)
+
 
 # =========================
-# 8. Hyperparameter optimization with Optuna
+# 8. Retrain LSTM model with the best hyperparameters
 # =========================
 K.clear_session()
 gc.collect()
@@ -263,14 +272,14 @@ best_model = build_lstm_model(
     lstm_units_2=best_params["lstm_units_2"],
     dropout_rate=best_params["dropout_rate"],
     learning_rate=best_params["learning_rate"],
-    l2_reg=best_params["l2_reg"]
+    l2_reg=best_params["l2_reg"],
 )
 
 early_stopping = EarlyStopping(
     monitor="val_loss",
     patience=best_params["patience"],
     restore_best_weights=True,
-    verbose=1
+    verbose=1,
 )
 
 history = best_model.fit(
@@ -280,12 +289,12 @@ history = best_model.fit(
     batch_size=best_params["batch_size"],
     validation_data=(X_validation, y_validation),
     verbose=1,
-    callbacks=[early_stopping]
+    callbacks=[early_stopping],
 )
 
 
 # =========================
-# 8. Prediction and evaluation
+# 9. Prediction and evaluation
 # =========================
 def inverse_predict(model, X, batch_size):
     pred_scaled = model.predict(X, batch_size=batch_size, verbose=0)
@@ -311,9 +320,9 @@ print("Test RMSE:", test_rmse)
 
 
 # =========================
-# 9. Error-based classification label generation
+# 10. Error-based classification label generation
 # =========================
-def compare_values(true_values, predicted_values):
+def compare_values(true_values, predicted_values, threshold=0.1):
     result = []
 
     true_values = np.asarray(true_values).reshape(-1)
@@ -327,7 +336,7 @@ def compare_values(true_values, predicted_values):
                 result.append(0)
         else:
             ratio = abs((pred - true) / (true + 1e-8))
-            if ratio > 0.1:
+            if ratio > threshold:
                 result.append(0)
             else:
                 result.append(1)
@@ -335,9 +344,9 @@ def compare_values(true_values, predicted_values):
     return result
 
 
-train_compared = compare_values(y_train_true, y_train_pred)
-test_compared = compare_values(y_test_true, y_test_pred)
-validation_compared = compare_values(y_validation_true, y_validation_pred)
+train_compared = compare_values(y_train_true, y_train_pred, threshold=ERROR_THRESHOLD)
+test_compared = compare_values(y_test_true, y_test_pred, threshold=ERROR_THRESHOLD)
+validation_compared = compare_values(y_validation_true, y_validation_pred, threshold=ERROR_THRESHOLD)
 
 unique, counts = np.unique(train_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
@@ -353,28 +362,27 @@ print("Validation label distribution:", distribution)
 
 
 # =========================
-# 10. Save model, scalers, and generated classification data
+# 11. Save model, scalers, and generated classification data
 # =========================
-best_model.save(OUTPUT_DIR / "best_bilstm_model.keras")
+best_model.save(OUTPUT_DIR / "best_lstm_model.keras")
 joblib.dump(scaler_X, OUTPUT_DIR / "scaler_X.pkl")
 joblib.dump(scaler_y, OUTPUT_DIR / "scaler_y.pkl")
 
-
 X_train_data = pd.DataFrame(
     X_train.reshape(X_train.shape[0], X_train.shape[2]),
-    columns=features_train.columns
+    columns=features_train.columns,
 )
 X_train_data["target"] = train_compared
 
 X_validation_data = pd.DataFrame(
     X_validation.reshape(X_validation.shape[0], X_validation.shape[2]),
-    columns=features_validation.columns
+    columns=features_validation.columns,
 )
 X_validation_data["target"] = validation_compared
 
 X_test_data = pd.DataFrame(
     X_test.reshape(X_test.shape[0], X_test.shape[2]),
-    columns=features_test.columns
+    columns=features_test.columns,
 )
 X_test_data["target"] = test_compared
 
@@ -382,11 +390,13 @@ X_train_data.to_csv(OUTPUT_DIR / "classification_train.csv", index=False)
 X_test_data.to_csv(OUTPUT_DIR / "classification_test.csv", index=False)
 X_validation_data.to_csv(OUTPUT_DIR / "classification_validation.csv", index=False)
 
-pred_result = pd.DataFrame({
-    "test_true": y_test_true.reshape(-1),
-    "test_pred": y_test_pred.reshape(-1),
-    "test_label": test_compared
-})
+pred_result = pd.DataFrame(
+    {
+        "test_true": y_test_true.reshape(-1),
+        "test_pred": y_test_pred.reshape(-1),
+        "test_label": test_compared,
+    }
+)
 pred_result.to_csv(OUTPUT_DIR / "test_prediction_result.csv", index=False)
 
 print("Model, scalers, classification data, and prediction results saved to:", OUTPUT_DIR)

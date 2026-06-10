@@ -1,4 +1,3 @@
-```python
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -54,7 +53,7 @@ tf.random.set_seed(SEED)
 # =========================
 # 3. Path and data configuration
 # =========================
-DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed/traff"))
+DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/cnn"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -167,8 +166,6 @@ def build_model(
     )
     model.add(Dropout(dropout_rate))
 
-    # Compared with Flatten, GlobalAveragePooling1D uses fewer parameters
-    # and is less prone to overfitting.
     model.add(GlobalAveragePooling1D())
 
     model.add(
@@ -422,4 +419,3 @@ pred_result = pd.DataFrame(
 pred_result.to_csv(OUTPUT_DIR / "test_prediction_result.csv", index=False)
 
 print("Model, scalers, classification data, and prediction results saved to:", OUTPUT_DIR)
-```

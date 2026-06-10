@@ -2,6 +2,8 @@ import os
 import json
 import joblib
 import random
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import optuna
@@ -12,34 +14,46 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 
 # =========================
-# 1. 固定随机种子
+# 1. Basic configuration
 # =========================
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 
+DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/rf"))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+RF_N_JOBS = int(os.getenv("RF_N_JOBS", "-1"))
+
+ERROR_THRESHOLD = float(os.getenv("ERROR_THRESHOLD", "0.1"))
+
 
 # =========================
-# 2. 数据读取
+# 2. Data loading
 # =========================
 predict_columns = [
-    'predict_T2_0.5', 'predict_T2_1', 'predict_T2_1.5', 'predict_T2_2', 'predict_T2_3',
-    'predict_T2_4', 'predict_T2_5', 'predict_T2_6', 'predict_T2_7', 'predict_T2_8',
-    'predict_T2_9', 'predict_T2_10', 'predict_T2_11', 'predict_T2_12', 'predict_T2_13',
-    'predict_T2_14', 'predict_T2_15', 'predict_T2_16', 'predict_T2_17', 'predict_T2_18',
-    'predict_T2_19', 'predict_T2_20', 'predict_T2_21', 'predict_T2_22', 'predict_T2_23',
-    'predict_T2_24',
-    'predict_T3_0.5', 'predict_T3_1', 'predict_T3_1.5', 'predict_T3_2', 'predict_T3_3',
-    'predict_T3_4', 'predict_T3_5', 'predict_T3_6', 'predict_T3_7', 'predict_T3_8',
-    'predict_T3_9', 'predict_T3_10', 'predict_T3_11', 'predict_T3_12', 'predict_T3_13',
-    'predict_T3_14', 'predict_T3_15', 'predict_T3_16', 'predict_T3_17', 'predict_T3_18',
-    'predict_T3_19', 'predict_T3_20', 'predict_T3_21', 'predict_T3_22', 'predict_T3_23',
-    'predict_T3_24'
+    "predict_T2_0.5", "predict_T2_1", "predict_T2_1.5", "predict_T2_2", "predict_T2_3",
+    "predict_T2_4", "predict_T2_5", "predict_T2_6", "predict_T2_7", "predict_T2_8",
+    "predict_T2_9", "predict_T2_10", "predict_T2_11", "predict_T2_12", "predict_T2_13",
+    "predict_T2_14", "predict_T2_15", "predict_T2_16", "predict_T2_17", "predict_T2_18",
+    "predict_T2_19", "predict_T2_20", "predict_T2_21", "predict_T2_22", "predict_T2_23",
+    "predict_T2_24",
+    "predict_T3_0.5", "predict_T3_1", "predict_T3_1.5", "predict_T3_2", "predict_T3_3",
+    "predict_T3_4", "predict_T3_5", "predict_T3_6", "predict_T3_7", "predict_T3_8",
+    "predict_T3_9", "predict_T3_10", "predict_T3_11", "predict_T3_12", "predict_T3_13",
+    "predict_T3_14", "predict_T3_15", "predict_T3_16", "predict_T3_17", "predict_T3_18",
+    "predict_T3_19", "predict_T3_20", "predict_T3_21", "predict_T3_22", "predict_T3_23",
+    "predict_T3_24",
 ]
 
-train_path = "/root/autodl-tmp/airport_project/data/xiao/traff/train.csv"
-test_path = "/root/autodl-tmp/airport_project/data/xiao/traff/test.csv"
-validation_path = "/root/autodl-tmp/airport_project/data/xiao/traff/test.csv"
+train_path = DATA_DIR / "train.csv"
+test_path = DATA_DIR / "test.csv"
+validation_path = DATA_DIR / "validation.csv"
+
+for file_path in [train_path, test_path, validation_path]:
+    if not file_path.exists():
+        raise FileNotFoundError(f"Required data file not found: {file_path}")
 
 train = pd.read_csv(train_path)
 test = pd.read_csv(test_path)
@@ -57,14 +71,14 @@ train_Y = train[target_col]
 test_Y = test[target_col]
 validation_Y = validation[target_col]
 
-print("数据已读取")
-print("训练集特征维度:", features_train.shape)
-print("测试集特征维度:", features_test.shape)
-print("验证集特征维度:", features_validation.shape)
+print("Data loaded successfully.")
+print("Training feature shape:", features_train.shape)
+print("Test feature shape:", features_test.shape)
+print("Validation feature shape:", features_validation.shape)
 
 
 # =========================
-# 3. 归一化
+# 3. Normalization
 # =========================
 scaler_X = MinMaxScaler()
 scaler_y = MinMaxScaler()
@@ -77,14 +91,14 @@ y_train = scaler_y.fit_transform(train_Y.values.reshape(-1, 1))
 y_test = scaler_y.transform(test_Y.values.reshape(-1, 1))
 y_validation = scaler_y.transform(validation_Y.values.reshape(-1, 1))
 
-print("归一化完成")
+print("Normalization completed.")
 print("X_train shape:", X_train.shape)
 print("X_test shape:", X_test.shape)
 print("X_validation shape:", X_validation.shape)
 
 
 # =========================
-# 4. Optuna 目标函数
+# 4. Optuna objective function
 # =========================
 def objective(trial):
     param_grid = {
@@ -94,12 +108,11 @@ def objective(trial):
         "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10, step=1),
         "max_features": trial.suggest_categorical(
             "max_features",
-            ["sqrt", "log2", 0.2, 0.3, 0.4, 0.5]
+            ["sqrt", "log2", 0.2, 0.3, 0.4, 0.5],
         ),
         "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
 
-        # RF 内部并行可以保留，但不要让 Optuna 也并行
-        "n_jobs": -1,
+        "n_jobs": RF_N_JOBS,
         "random_state": SEED,
     }
 
@@ -119,39 +132,39 @@ def objective(trial):
 
 
 # =========================
-# 5. Optuna 调参
+# 5. Hyperparameter optimization with Optuna
 # =========================
 study_rf = optuna.create_study(direction="minimize")
 
 study_rf.optimize(
     objective,
     n_trials=50,
-    n_jobs=1
+    n_jobs=1,
 )
 
-print("最优验证集 RMSE:", study_rf.best_value)
-print("最佳超参数:", study_rf.best_params)
+print("Best validation RMSE:", study_rf.best_value)
+print("Best hyperparameters:", study_rf.best_params)
 
 best_params = study_rf.best_params
 
-with open("/root/autodl-tmp/airport_project/data/xiao/air/predict/best_rf_params.json", "w", encoding="utf-8") as f:
-    json.dump(best_params, f, ensure_ascii=False, indent=4)
+with open(OUTPUT_DIR / "best_rf_params.json", "w", encoding="utf-8") as f:
+    json.dump(best_params, f, ensure_ascii=True, indent=4)
 
 
 # =========================
-# 6. 使用最佳参数训练最终 RF 模型
+# 6. Train the final Random Forest model with the best hyperparameters
 # =========================
 rf_model = RandomForestRegressor(
     **best_params,
-    n_jobs=-1,
-    random_state=SEED
+    n_jobs=RF_N_JOBS,
+    random_state=SEED,
 )
 
 rf_model.fit(X_train, y_train.ravel())
 
 
 # =========================
-# 7. 预测与评估
+# 7. Prediction and evaluation
 # =========================
 def inverse_predict(model, X):
     pred_scaled = model.predict(X)
@@ -175,17 +188,17 @@ train_mae = mean_absolute_error(y_train_true, y_train_pred)
 validation_mae = mean_absolute_error(y_validation_true, y_validation_pred)
 test_mae = mean_absolute_error(y_test_true, y_test_pred)
 
-print("train rmse:", train_rmse)
-print("validation rmse:", validation_rmse)
-print("test rmse:", test_rmse)
+print("Train RMSE:", train_rmse)
+print("Validation RMSE:", validation_rmse)
+print("Test RMSE:", test_rmse)
 
-print("train mae:", train_mae)
-print("validation mae:", validation_mae)
-print("test mae:", test_mae)
+print("Train MAE:", train_mae)
+print("Validation MAE:", validation_mae)
+print("Test MAE:", test_mae)
 
 
 # =========================
-# 8. 误差分类标签生成
+# 8. Error-based classification label generation
 # =========================
 def compare_values(true_values, predicted_values, threshold=0.1):
     result = []
@@ -210,62 +223,59 @@ def compare_values(true_values, predicted_values, threshold=0.1):
     return result
 
 
-# 如果你做 10% 误差分类，用 threshold=0.1
-# 如果你做 20% 敏感性实验，改成 threshold=0.2
-error_threshold = 0.1
-
-train_compared = compare_values(y_train_true, y_train_pred, threshold=error_threshold)
-validation_compared = compare_values(y_validation_true, y_validation_pred, threshold=error_threshold)
-test_compared = compare_values(y_test_true, y_test_pred, threshold=error_threshold)
+train_compared = compare_values(y_train_true, y_train_pred, threshold=ERROR_THRESHOLD)
+validation_compared = compare_values(y_validation_true, y_validation_pred, threshold=ERROR_THRESHOLD)
+test_compared = compare_values(y_test_true, y_test_pred, threshold=ERROR_THRESHOLD)
 
 unique, counts = np.unique(train_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-print("训练集类别分布:", distribution)
+print("Training label distribution:", distribution)
 
 unique, counts = np.unique(validation_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-print("验证集类别分布:", distribution)
+print("Validation label distribution:", distribution)
 
 unique, counts = np.unique(test_compared, return_counts=True)
 distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-print("测试集类别分布:", distribution)
+print("Test label distribution:", distribution)
 
 
 # =========================
-# 9. 保存模型、归一化器和结果
+# 9. Save model, scalers, and generated results
 # =========================
-save_dir = "/root/autodl-tmp/airport_project/data/xiao/traff/predict/rf"
-os.makedirs(save_dir, exist_ok=True)
+joblib.dump(rf_model, OUTPUT_DIR / "best_rf_model.pkl")
+joblib.dump(scaler_X, OUTPUT_DIR / "scaler_X.pkl")
+joblib.dump(scaler_y, OUTPUT_DIR / "scaler_y.pkl")
 
-joblib.dump(rf_model, os.path.join(save_dir, "best_rf_model.pkl"))
-joblib.dump(scaler_X, os.path.join(save_dir, "scaler_X.pkl"))
-joblib.dump(scaler_y, os.path.join(save_dir, "scaler_y.pkl"))
 X_train_data = pd.DataFrame(X_train, columns=features_train.columns)
 X_train_data["target"] = train_compared
 
 X_validation_data = pd.DataFrame(X_validation, columns=features_validation.columns)
-
 X_validation_data["target"] = validation_compared
 
 X_test_data = pd.DataFrame(X_test, columns=features_test.columns)
 X_test_data["target"] = test_compared
 
-X_train_data.to_csv(os.path.join(save_dir, "classification_train.csv"), index=False)
-X_validation_data.to_csv(os.path.join(save_dir, "classification_validation.csv"), index=False)
-X_test_data.to_csv(os.path.join(save_dir, "classification_test.csv"), index=False)
+X_train_data.to_csv(OUTPUT_DIR / "classification_train.csv", index=False)
+X_validation_data.to_csv(OUTPUT_DIR / "classification_validation.csv", index=False)
+X_test_data.to_csv(OUTPUT_DIR / "classification_test.csv", index=False)
 
-pred_result = pd.DataFrame({
-    "test_true": y_test_true.reshape(-1),
-    "test_pred": y_test_pred.reshape(-1),
-    "test_label": test_compared
-})
-pred_result.to_csv(os.path.join(save_dir, "test_prediction_result.csv"), index=False)
+pred_result = pd.DataFrame(
+    {
+        "test_true": y_test_true.reshape(-1),
+        "test_pred": y_test_pred.reshape(-1),
+        "test_label": test_compared,
+    }
+)
+pred_result.to_csv(OUTPUT_DIR / "test_prediction_result.csv", index=False)
 
-metrics_result = pd.DataFrame({
-    "dataset": ["train", "validation", "test"],
-    "rmse": [train_rmse, validation_rmse, test_rmse],
-    "mae": [train_mae, validation_mae, test_mae]
-})
-metrics_result.to_csv(os.path.join(save_dir, "metrics_result.csv"), index=False)
+metrics_result = pd.DataFrame(
+    {
+        "dataset": ["train", "validation", "test"],
+        "rmse": [train_rmse, validation_rmse, test_rmse],
+        "mae": [train_mae, validation_mae, test_mae],
+    }
+)
+metrics_result.to_csv(OUTPUT_DIR / "metrics_result.csv", index=False)
 
-print("RF模型、归一化器、分类数据和预测结果已保存到:", save_dir)
+print("Random Forest model, scalers, classification data, and prediction results saved to:", OUTPUT_DIR)
