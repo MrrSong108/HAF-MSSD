@@ -19,35 +19,58 @@ warnings.filterwarnings("ignore")
 
 
 # =========================================================
-# 1. 路径配置
-# =========================================================
-PROJECT_DIR = Path("/root/autodl-tmp/airport_project")
+# 1. Path and basic configuration
+DATA_DIR = Path(os.getenv("DATA_DIR", "data/processed"))
 
-TRAIN_PATH = PROJECT_DIR / "data/xiao/train.csv"
-VALIDATION_PATH = PROJECT_DIR / "data/xiao/test.csv"
-TEST_PATH = PROJECT_DIR / "data/xiao/test.csv"
+TRAIN_PATH = Path(os.getenv("TRAIN_PATH", DATA_DIR / "train.csv"))
+VALIDATION_PATH = Path(os.getenv("VALIDATION_PATH", DATA_DIR / "validation.csv"))
+TEST_PATH = Path(os.getenv("TEST_PATH", DATA_DIR / "test.csv"))
 
-OUTPUT_DIR = PROJECT_DIR / "data/TCFM/tcfm_euclidean_xgb_optuna"
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/tcfm_euclidean_xgboost_optuna"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-TARGET_COL = "predict_T2_0.5"
-TIME_COL = "start_time"
+TARGET_COL = os.getenv("TARGET_COL", "predict_T2_0.5")
+TIME_COL = os.getenv("TIME_COL", "start_time")
 
-RANDOM_STATE = 42
+RANDOM_STATE = int(os.getenv("RANDOM_STATE", "42"))
 
-# KMeans 聚类数搜索范围
-K_MIN = 2
-K_MAX = 20
+# Search range for the number of KMeans clusters.
+K_MIN = int(os.getenv("K_MIN", "2"))
+K_MAX = int(os.getenv("K_MAX", "20"))
 
-# 每个簇最少样本数，过小的簇不单独训练模型
-MIN_CLUSTER_SAMPLES = 100
+MIN_CLUSTER_SAMPLES = int(os.getenv("MIN_CLUSTER_SAMPLES", "100"))
 
-# Optuna 搜索次数
-N_TRIALS = 50
+N_TRIALS = int(os.getenv("N_TRIALS", "50"))
+
+# Time-series clustering configuration.
+CLUSTER_METRIC = os.getenv("CLUSTER_METRIC", "euclidean")
+CLUSTER_FEATURE_PREFIX = os.getenv("CLUSTER_FEATURE_PREFIX", "queue_countpassed")
+KMEANS_N_JOBS = int(os.getenv("KMEANS_N_JOBS", "4"))
+
+# XGBoost parallel jobs.
+XGB_N_JOBS = int(os.getenv("XGB_N_JOBS", "8"))
+
+XGBOOST_DEVICE = os.getenv("XGBOOST_DEVICE", "cpu")
+
+SAVE_DETAILED_OUTPUTS = os.getenv("SAVE_DETAILED_OUTPUTS", "0") == "1"
 
 
 # =========================================================
-# 2. 评价指标
+# 2. File validation
+# =========================================================
+for file_path in [TRAIN_PATH, VALIDATION_PATH, TEST_PATH]:
+    if not file_path.exists():
+        raise FileNotFoundError(f"Required data file not found: {file_path}")
+
+if VALIDATION_PATH.resolve() == TEST_PATH.resolve():
+    raise ValueError(
+        "Validation and test files must be different. "
+        "Using the test set as the validation set causes data leakage."
+    )
+
+
+# =========================================================
+# 3. Evaluation metrics
 # =========================================================
 def calc_metrics(y_true, y_pred):
     y_true = np.asarray(y_true).reshape(-1)
@@ -56,10 +79,8 @@ def calc_metrics(y_true, y_pred):
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
 
-    # 平滑 MAPE，避免 y_true=0
-    mape = np.mean(np.abs(y_true - y_pred) / (np.abs(y_true) + 1)) * 100
+    mape = np.mean(np.abs(y_true - y_pred) / (np.abs(y_true) + 1))
 
-    # Directional Symmetry
     if len(y_true) > 1:
         true_diff = np.diff(y_true)
         pred_diff = np.diff(y_pred)
@@ -71,12 +92,12 @@ def calc_metrics(y_true, y_pred):
         "RMSE": float(rmse),
         "MAE": float(mae),
         "MAPE": float(mape),
-        "DS": float(ds)
+        "DS": float(ds),
     }
 
 
 # =========================================================
-# 3. 读取数据
+# 4. Data loading
 # =========================================================
 def read_data(path):
     df = pd.read_csv(path)
@@ -88,7 +109,8 @@ def read_data(path):
     return df
 
 
-print("正在读取数据...")
+print("Loading data...")
+
 train_df = read_data(TRAIN_PATH)
 valid_df = read_data(VALIDATION_PATH)
 test_df = read_data(TEST_PATH)
@@ -99,29 +121,28 @@ print(f"Test shape: {test_df.shape}")
 
 
 # =========================================================
-# 4. 基础检查
+# 5. Basic checks
 # =========================================================
 for name, df in [("train", train_df), ("validation", valid_df), ("test", test_df)]:
     if TARGET_COL not in df.columns:
-        raise ValueError(f"{name} 数据中缺少目标列: {TARGET_COL}")
+        raise ValueError(f"The target column '{TARGET_COL}' is missing in the {name} dataset.")
 
 if TIME_COL not in train_df.columns:
-    print(f"警告：未找到时间列 {TIME_COL}，将按原始顺序处理。")
+    print(f"Warning: time column '{TIME_COL}' was not found. Data will be processed in the original order.")
 
 
 # =========================================================
-# 5. 删除无效列与目标泄露列
+# 6. Remove invalid columns and target-leakage columns
 # =========================================================
 def build_feature_data(train_df, valid_df, test_df, target_col):
     """
-    删除：
-    1. start_time 时间列
-    2. 所有 predict_* 目标列，防止目标泄露
-    3. 训练集中全空列
-    4. 训练集中常数列
+    Remove:
+    1. The time column.
+    2. All predict_* target columns to avoid target leakage.
+    3. Columns that are entirely missing in the training set.
+    4. Constant columns in the training set.
 
-    保留：
-    queue、check、wait、traff、plane、时序统计等正常特征。
+    Keep valid multi-source features for prediction.
     """
 
     predict_cols = [c for c in train_df.columns if c.startswith("predict_")]
@@ -142,73 +163,60 @@ def build_feature_data(train_df, valid_df, test_df, target_col):
     X_valid = valid_df.drop(columns=drop_cols, errors="ignore")
     X_test = test_df.drop(columns=drop_cols, errors="ignore")
 
-    # 只保留三份数据共有的列
-    common_cols = list(set(X_train.columns) & set(X_valid.columns) & set(X_test.columns))
-    common_cols = sorted(common_cols)
+    common_cols = sorted(list(set(X_train.columns) & set(X_valid.columns) & set(X_test.columns)))
 
     X_train = X_train[common_cols]
     X_valid = X_valid[common_cols]
     X_test = X_test[common_cols]
 
-    # 删除训练集中全空列
     all_nan_cols = X_train.columns[X_train.isna().all()].tolist()
     if all_nan_cols:
-        print(f"删除训练集中全空列数量: {len(all_nan_cols)}")
+        print(f"Number of all-empty columns removed from training data: {len(all_nan_cols)}")
         X_train = X_train.drop(columns=all_nan_cols)
         X_valid = X_valid.drop(columns=all_nan_cols)
         X_test = X_test.drop(columns=all_nan_cols)
 
-    # 删除训练集中常数列
     nunique = X_train.nunique(dropna=True)
     constant_cols = nunique[nunique <= 1].index.tolist()
     if constant_cols:
-        print(f"删除训练集中常数列数量: {len(constant_cols)}")
+        print(f"Number of constant columns removed from training data: {len(constant_cols)}")
         X_train = X_train.drop(columns=constant_cols)
         X_valid = X_valid.drop(columns=constant_cols)
         X_test = X_test.drop(columns=constant_cols)
 
-    # 缺失值使用训练集均值填充
     fill_values = X_train.mean(numeric_only=True)
 
-    X_train = X_train.fillna(fill_values)
-    X_valid = X_valid.fillna(fill_values)
-    X_test = X_test.fillna(fill_values)
-
-    # 如果还有缺失，统一填 0
-    X_train = X_train.fillna(0)
-    X_valid = X_valid.fillna(0)
-    X_test = X_test.fillna(0)
+    X_train = X_train.fillna(fill_values).fillna(0)
+    X_valid = X_valid.fillna(fill_values).fillna(0)
+    X_test = X_test.fillna(fill_values).fillna(0)
 
     return X_train, X_valid, X_test, y_train, y_valid, y_test
 
 
 X_train, X_valid, X_test, y_train, y_valid, y_test = build_feature_data(
-    train_df, valid_df, test_df, TARGET_COL
+    train_df,
+    valid_df,
+    test_df,
+    TARGET_COL,
 )
 
-print(f"处理后 X_train shape: {X_train.shape}")
-print(f"处理后 X_valid shape: {X_valid.shape}")
-print(f"处理后 X_test shape: {X_test.shape}")
+print(f"Processed X_train shape: {X_train.shape}")
+print(f"Processed X_valid shape: {X_valid.shape}")
+print(f"Processed X_test shape: {X_test.shape}")
 
 
 # =========================================================
-# 6. 选择聚类特征：queue_countpassed* 历史排队特征
+# 7. Select clustering features
 # =========================================================
 def get_cluster_columns(columns):
     """
-    使用 queue_countpassed* 作为聚类依据。
-    这些特征用于刻画历史排队模式。
+    Use historical queue-related features as the clustering basis.
     """
 
-    cluster_cols = []
-
-    for c in columns:
-        if c.startswith("queue_countpassed"):
-            cluster_cols.append(c)
-
-    # 这里沿用之前逻辑：排除完全等于 queue_countpassed 的列
-    # 如果你想保留 queue_countpassed 本身，可以删除下面这一行
-    cluster_cols = [c for c in cluster_cols if c != "queue_countpassed"]
+    cluster_cols = [
+        c for c in columns
+        if c.startswith(CLUSTER_FEATURE_PREFIX) and c != CLUSTER_FEATURE_PREFIX
+    ]
 
     return cluster_cols
 
@@ -216,10 +224,12 @@ def get_cluster_columns(columns):
 cluster_cols = get_cluster_columns(X_train.columns)
 
 if len(cluster_cols) == 0:
-    raise ValueError("未找到 queue_countpassed* 聚类特征，请检查数据列名。")
+    raise ValueError(
+        f"No clustering features were found with prefix '{CLUSTER_FEATURE_PREFIX}'. "
+        "Please check the feature names or set CLUSTER_FEATURE_PREFIX."
+    )
 
-print(f"用于聚类的 queue_countpassed* 特征数量: {len(cluster_cols)}")
-print("聚类特征示例:", cluster_cols[:20])
+print(f"Number of clustering features: {len(cluster_cols)}")
 
 X_train_cluster = X_train[cluster_cols].copy()
 X_valid_cluster = X_valid[cluster_cols].copy()
@@ -227,39 +237,28 @@ X_test_cluster = X_test[cluster_cols].copy()
 
 
 # =========================================================
-# 7. TimeSeriesKMeans 聚类输入格式转换
+# 8. Convert clustering input to time-series format
 # =========================================================
-"""
-当前实验设置：
-聚类方法：TimeSeriesKMeans
-距离度量：Euclidean
-聚类输入：queue_countpassed* 历史排队特征
-预测输入：全部正常多源特征
-"""
-
-CLUSTER_METRIC = "euclidean"
-
-print(f"\n当前使用的时间序列聚类距离: {CLUSTER_METRIC}")
+print(f"\nTime-series clustering metric: {CLUSTER_METRIC}")
 
 X_train_cluster_ts = X_train_cluster.values.reshape(
     X_train_cluster.shape[0],
     X_train_cluster.shape[1],
-    1
+    1,
 )
 
 X_valid_cluster_ts = X_valid_cluster.values.reshape(
     X_valid_cluster.shape[0],
     X_valid_cluster.shape[1],
-    1
+    1,
 )
 
 X_test_cluster_ts = X_test_cluster.values.reshape(
     X_test_cluster.shape[0],
     X_test_cluster.shape[1],
-    1
+    1,
 )
 
-# 时间序列标准化
 ts_scaler = TimeSeriesScalerMeanVariance(mu=0.0, std=1.0)
 
 X_train_cluster_scaled = ts_scaler.fit_transform(X_train_cluster_ts)
@@ -268,19 +267,25 @@ X_test_cluster_scaled = ts_scaler.transform(X_test_cluster_ts)
 
 
 # =========================================================
-# 8. 使用 DBI 搜索最优聚类数 K
+# 9. Search for the optimal number of clusters using DBI
 # =========================================================
-print("\n开始使用 TimeSeriesKMeans 搜索最优聚类数 K...")
+print("\nSearching for the optimal number of clusters with TimeSeriesKMeans...")
 
 dbi_records = []
 
 X_train_flat = X_train_cluster_scaled.reshape(
     X_train_cluster_scaled.shape[0],
-    -1
+    -1,
 )
 
+
+def format_cluster_counts(labels):
+    counts = pd.Series(labels).value_counts().sort_index().to_dict()
+    return {int(k): int(v) for k, v in counts.items()}
+
+
 for k in range(K_MIN, K_MAX + 1):
-    print(f"正在计算 K={k}, metric={CLUSTER_METRIC} ...")
+    print(f"Evaluating K={k}, metric={CLUSTER_METRIC} ...")
 
     ts_kmeans = TimeSeriesKMeans(
         n_clusters=k,
@@ -289,40 +294,43 @@ for k in range(K_MIN, K_MAX + 1):
         n_init=3,
         random_state=RANDOM_STATE,
         verbose=False,
-        n_jobs=4
+        n_jobs=KMEANS_N_JOBS,
     )
 
     train_labels = ts_kmeans.fit_predict(X_train_cluster_scaled)
 
     dbi = davies_bouldin_score(X_train_flat, train_labels)
+    cluster_counts = format_cluster_counts(train_labels)
 
-    cluster_counts = pd.Series(train_labels).value_counts().sort_index().to_dict()
-
-    dbi_records.append({
-        "K": k,
-        "DBI": dbi,
-        "cluster_counts": cluster_counts
-    })
+    dbi_records.append(
+        {
+            "K": int(k),
+            "DBI": float(dbi),
+            "cluster_counts": cluster_counts,
+        }
+    )
 
     print(f"K={k}, DBI={dbi:.6f}, cluster_counts={cluster_counts}")
 
 
-dbi_df = pd.DataFrame([
-    {
-        "K": r["K"],
-        "DBI": r["DBI"],
-        "cluster_counts": json.dumps(r["cluster_counts"], ensure_ascii=False)
-    }
-    for r in dbi_records
-])
+dbi_df = pd.DataFrame(
+    [
+        {
+            "K": r["K"],
+            "DBI": r["DBI"],
+            "cluster_counts": json.dumps(r["cluster_counts"], ensure_ascii=True),
+        }
+        for r in dbi_records
+    ]
+)
 
 dbi_path = OUTPUT_DIR / f"dbi_search_results_{CLUSTER_METRIC}.csv"
-dbi_df.to_csv(dbi_path, index=False, encoding="utf-8-sig")
+dbi_df.to_csv(dbi_path, index=False)
 
 best_record = min(dbi_records, key=lambda x: x["DBI"])
 best_k = best_record["K"]
 
-print("\n最优聚类数搜索完成")
+print("\nCluster number search completed.")
 print(f"Best metric = {CLUSTER_METRIC}")
 print(f"Best K = {best_k}")
 print(f"Best DBI = {best_record['DBI']:.6f}")
@@ -330,9 +338,9 @@ print(f"Best cluster counts = {best_record['cluster_counts']}")
 
 
 # =========================================================
-# 9. 使用最优 K 重新训练最终 TimeSeriesKMeans
+# 10. Train the final TimeSeriesKMeans model
 # =========================================================
-print("\n正在训练最终 TimeSeriesKMeans 聚类模型...")
+print("\nTraining the final TimeSeriesKMeans clustering model...")
 
 final_kmeans = TimeSeriesKMeans(
     n_clusters=best_k,
@@ -341,179 +349,96 @@ final_kmeans = TimeSeriesKMeans(
     n_init=5,
     random_state=RANDOM_STATE,
     verbose=False,
-    n_jobs=4
+    n_jobs=KMEANS_N_JOBS,
 )
 
 train_cluster_labels = final_kmeans.fit_predict(X_train_cluster_scaled)
 valid_cluster_labels = final_kmeans.predict(X_valid_cluster_scaled)
 test_cluster_labels = final_kmeans.predict(X_test_cluster_scaled)
 
-print("训练集簇分布:")
+print("Training cluster distribution:")
 print(pd.Series(train_cluster_labels).value_counts().sort_index())
 
-print("验证集簇分布:")
+print("Validation cluster distribution:")
 print(pd.Series(valid_cluster_labels).value_counts().sort_index())
 
-print("测试集簇分布:")
+print("Test cluster distribution:")
 print(pd.Series(test_cluster_labels).value_counts().sort_index())
 
 
 # =========================================================
-# 10. 保存聚类标签
+# 11. Optional: save cluster labels
 # =========================================================
-cluster_label_df_train = pd.DataFrame({
-    "dataset": "train",
-    "cluster": train_cluster_labels,
-    "y_true": y_train.values
-})
+if SAVE_DETAILED_OUTPUTS:
+    cluster_label_df_train = pd.DataFrame(
+        {
+            "dataset": "train",
+            "cluster": train_cluster_labels,
+            "y_true": y_train.values,
+        }
+    )
 
-cluster_label_df_valid = pd.DataFrame({
-    "dataset": "validation",
-    "cluster": valid_cluster_labels,
-    "y_true": y_valid.values
-})
+    cluster_label_df_valid = pd.DataFrame(
+        {
+            "dataset": "validation",
+            "cluster": valid_cluster_labels,
+            "y_true": y_valid.values,
+        }
+    )
 
-cluster_label_df_test = pd.DataFrame({
-    "dataset": "test",
-    "cluster": test_cluster_labels,
-    "y_true": y_test.values
-})
+    cluster_label_df_test = pd.DataFrame(
+        {
+            "dataset": "test",
+            "cluster": test_cluster_labels,
+            "y_true": y_test.values,
+        }
+    )
 
-if TIME_COL in train_df.columns:
-    cluster_label_df_train[TIME_COL] = train_df[TIME_COL].values
-    cluster_label_df_valid[TIME_COL] = valid_df[TIME_COL].values
-    cluster_label_df_test[TIME_COL] = test_df[TIME_COL].values
+    if TIME_COL in train_df.columns:
+        cluster_label_df_train[TIME_COL] = train_df[TIME_COL].values
+        cluster_label_df_valid[TIME_COL] = valid_df[TIME_COL].values
+        cluster_label_df_test[TIME_COL] = test_df[TIME_COL].values
 
-cluster_label_all = pd.concat(
-    [cluster_label_df_train, cluster_label_df_valid, cluster_label_df_test],
-    axis=0,
-    ignore_index=True
-)
+    cluster_label_all = pd.concat(
+        [cluster_label_df_train, cluster_label_df_valid, cluster_label_df_test],
+        axis=0,
+        ignore_index=True,
+    )
 
-cluster_label_all.to_csv(
-    OUTPUT_DIR / "cluster_labels.csv",
-    index=False,
-    encoding="utf-8-sig"
-)
+    cluster_label_all.to_csv(
+        OUTPUT_DIR / "cluster_labels.csv",
+        index=False,
+    )
 
 
 # =========================================================
-# 11. XGBoost + Optuna
+# 12. XGBoost configuration
 # =========================================================
-"""
-你给出的参考参数：
-{
-    'n_estimators': 300,
-    'max_depth': 6,
-    'learning_rate': 0.031387720624392,
-    'subsample': 0.7218108254950322,
-    'colsample_bytree': 0.7582616510520586,
-    'min_child_weight': 8.650194614997286,
-    'gamma': 1.558765264877733e-05,
-    'reg_alpha': 2.2474666187591545e-06,
-    'reg_lambda': 3.0924432950452505e-06
-}
-
-搜索空间围绕这组参数设置：
-- n_estimators：以 300 为中心，扩展到 100-800
-- max_depth：以 6 为中心，扩展到 3-12
-- learning_rate：以 0.03 为中心，使用 log 搜索
-- subsample / colsample_bytree：围绕 0.7-0.8 扩展到 0.5-1.0
-- min_child_weight：围绕 8.6 扩展到 1-20
-- gamma / reg_alpha / reg_lambda：参考值很小，因此使用 log 搜索
-"""
-
 BASE_XGB_PARAMS = {
     "n_estimators": 300,
     "max_depth": 6,
-    "learning_rate": 0.031387720624392,
-    "subsample": 0.7218108254950322,
-    "colsample_bytree": 0.7582616510520586,
-    "min_child_weight": 8.650194614997286,
-    "gamma": 1.558765264877733e-05,
-    "reg_alpha": 2.2474666187591545e-06,
-    "reg_lambda": 3.0924432950452505e-06
+    "learning_rate": 0.03,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5.0,
+    "gamma": 1e-5,
+    "reg_alpha": 1e-6,
+    "reg_lambda": 1e-6,
 }
-
-# Optuna 搜索次数
-N_TRIALS = 50
-
-# XGBoost 并行线程数
-XGB_N_JOBS = 8
 
 
 def suggest_xgb_params(trial):
-    params = {
-        # 以 300 为中心，适当扩大搜索范围
-        "n_estimators": trial.suggest_int(
-            "n_estimators",
-            100,
-            800,
-            step=50
-        ),
-
-        # 以 max_depth=6 为中心，允许更浅或更深
-        "max_depth": trial.suggest_int(
-            "max_depth",
-            3,
-            12
-        ),
-
-        # 以 0.03 左右为中心，采用 log 搜索更稳妥
-        "learning_rate": trial.suggest_float(
-            "learning_rate",
-            0.005,
-            0.1,
-            log=True
-        ),
-
-        # 以 0.72 为中心，允许较强随机采样
-        "subsample": trial.suggest_float(
-            "subsample",
-            0.5,
-            1.0
-        ),
-
-        # 以 0.76 为中心，搜索特征采样比例
-        "colsample_bytree": trial.suggest_float(
-            "colsample_bytree",
-            0.5,
-            1.0
-        ),
-
-        # 以 8.65 为中心，控制叶子节点最小权重
-        "min_child_weight": trial.suggest_float(
-            "min_child_weight",
-            1.0,
-            20.0
-        ),
-
-        # 参考值很小，采用 log 搜索
-        "gamma": trial.suggest_float(
-            "gamma",
-            1e-8,
-            5.0,
-            log=True
-        ),
-
-        # L1 正则，参考值很小，采用 log 搜索
-        "reg_alpha": trial.suggest_float(
-            "reg_alpha",
-            1e-8,
-            10.0,
-            log=True
-        ),
-
-        # L2 正则，参考值很小，采用 log 搜索
-        "reg_lambda": trial.suggest_float(
-            "reg_lambda",
-            1e-8,
-            10.0,
-            log=True
-        )
+    return {
+        "n_estimators": trial.suggest_int("n_estimators", 100, 800, step=50),
+        "max_depth": trial.suggest_int("max_depth", 3, 12),
+        "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "min_child_weight": trial.suggest_float("min_child_weight", 1.0, 20.0),
+        "gamma": trial.suggest_float("gamma", 1e-8, 5.0, log=True),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
     }
-
-    return params
 
 
 def create_xgb_model(params):
@@ -521,8 +446,9 @@ def create_xgb_model(params):
         **params,
         objective="reg:squarederror",
         tree_method="hist",
+        device=XGBOOST_DEVICE,
         random_state=RANDOM_STATE,
-        n_jobs=XGB_N_JOBS
+        n_jobs=XGB_N_JOBS,
     )
 
     return model
@@ -534,11 +460,11 @@ def optimize_xgb_for_cluster(
     X_c_valid,
     y_c_valid,
     cluster_id,
-    n_trials=N_TRIALS
+    n_trials=N_TRIALS,
 ):
     """
-    在单个簇内部使用 Optuna 搜索 XGBoost 参数。
-    目标函数：验证集 RMSE 最小。
+    Optimize XGBoost hyperparameters within a single cluster.
+    The objective is to minimize validation RMSE.
     """
 
     def objective(trial):
@@ -557,14 +483,14 @@ def optimize_xgb_for_cluster(
     study = optuna.create_study(
         direction="minimize",
         sampler=sampler,
-        study_name=f"xgb_cluster_{cluster_id}"
+        study_name=f"xgb_cluster_{cluster_id}",
     )
 
     study.optimize(
         objective,
         n_trials=n_trials,
         n_jobs=1,
-        show_progress_bar=False
+        show_progress_bar=False,
     )
 
     best_params = study.best_params
@@ -577,23 +503,24 @@ def optimize_xgb_for_cluster(
 
 
 # =========================================================
-# 12. 训练每个簇内部的 XGBoost 子模型
+# 13. Train cluster-specific XGBoost models
 # =========================================================
-print("\n开始训练每个簇内部的 XGBoost 子模型...")
+print("\nTraining cluster-specific XGBoost models...")
 
 cluster_models = {}
 cluster_best_params = {}
 cluster_optuna_records = []
 cluster_metrics_records = []
 
-# 全局兜底模型：当某个簇样本过少，或者验证集没有对应簇时使用
-print("正在训练全局兜底 XGBoost 模型...")
+# Global fallback model used when a cluster has too few samples
+# or has no validation samples.
+print("Training the global fallback XGBoost model...")
 
 global_model = create_xgb_model(BASE_XGB_PARAMS)
 global_model.fit(X_train, y_train)
 
 for cluster_id in range(best_k):
-    print(f"\n========== 训练 Cluster {cluster_id} ==========")
+    print(f"\n========== Training Cluster {cluster_id} ==========")
 
     train_idx = np.where(train_cluster_labels == cluster_id)[0]
     valid_idx = np.where(valid_cluster_labels == cluster_id)[0]
@@ -601,37 +528,39 @@ for cluster_id in range(best_k):
     n_train_cluster = len(train_idx)
     n_valid_cluster = len(valid_idx)
 
-    print(f"Cluster {cluster_id} train samples: {n_train_cluster}")
+    print(f"Cluster {cluster_id} training samples: {n_train_cluster}")
     print(f"Cluster {cluster_id} validation samples: {n_valid_cluster}")
 
     if n_train_cluster < MIN_CLUSTER_SAMPLES:
         print(
-            f"Cluster {cluster_id} 训练样本数小于 {MIN_CLUSTER_SAMPLES}，"
-            f"不单独训练，使用全局 XGBoost 模型作为兜底。"
+            f"Cluster {cluster_id} has fewer than {MIN_CLUSTER_SAMPLES} training samples. "
+            "The global fallback model will be used."
         )
 
         cluster_models[cluster_id] = global_model
         cluster_best_params[cluster_id] = BASE_XGB_PARAMS.copy()
 
-        cluster_optuna_records.append({
-            "cluster": cluster_id,
-            "train_samples": n_train_cluster,
-            "validation_samples": n_valid_cluster,
-            "status": "fallback_small_train_cluster",
-            "best_rmse": None,
-            "best_params": json.dumps(BASE_XGB_PARAMS, ensure_ascii=False)
-        })
+        cluster_optuna_records.append(
+            {
+                "cluster": int(cluster_id),
+                "train_samples": int(n_train_cluster),
+                "validation_samples": int(n_valid_cluster),
+                "status": "fallback_small_train_cluster",
+                "best_rmse": None,
+                "best_params": json.dumps(BASE_XGB_PARAMS, ensure_ascii=True),
+            }
+        )
 
         continue
 
+    X_c_train = X_train.iloc[train_idx]
+    y_c_train = y_train.iloc[train_idx]
+
     if n_valid_cluster == 0:
         print(
-            f"Cluster {cluster_id} 在验证集中没有样本，"
-            f"无法进行 Optuna 验证调参，使用基础 XGBoost 参数训练。"
+            f"Cluster {cluster_id} has no validation samples. "
+            "The base XGBoost parameters will be used."
         )
-
-        X_c_train = X_train.iloc[train_idx]
-        y_c_train = y_train.iloc[train_idx]
 
         model = create_xgb_model(BASE_XGB_PARAMS)
         model.fit(X_c_train, y_c_train)
@@ -639,71 +568,64 @@ for cluster_id in range(best_k):
         cluster_models[cluster_id] = model
         cluster_best_params[cluster_id] = BASE_XGB_PARAMS.copy()
 
-        cluster_optuna_records.append({
-            "cluster": cluster_id,
-            "train_samples": n_train_cluster,
-            "validation_samples": n_valid_cluster,
-            "status": "base_params_no_validation_samples",
-            "best_rmse": None,
-            "best_params": json.dumps(BASE_XGB_PARAMS, ensure_ascii=False)
-        })
+        cluster_optuna_records.append(
+            {
+                "cluster": int(cluster_id),
+                "train_samples": int(n_train_cluster),
+                "validation_samples": int(n_valid_cluster),
+                "status": "base_params_no_validation_samples",
+                "best_rmse": None,
+                "best_params": json.dumps(BASE_XGB_PARAMS, ensure_ascii=True),
+            }
+        )
 
         continue
-
-    X_c_train = X_train.iloc[train_idx]
-    y_c_train = y_train.iloc[train_idx]
 
     X_c_valid = X_valid.iloc[valid_idx]
     y_c_valid = y_valid.iloc[valid_idx]
 
-    # -----------------------------
-    # Optuna 搜索 XGBoost 参数
-    # -----------------------------
     best_params, best_rmse, study = optimize_xgb_for_cluster(
         X_c_train=X_c_train,
         y_c_train=y_c_train,
         X_c_valid=X_c_valid,
         y_c_valid=y_c_valid,
         cluster_id=cluster_id,
-        n_trials=N_TRIALS
+        n_trials=N_TRIALS,
     )
 
     cluster_best_params[cluster_id] = best_params
 
-    cluster_optuna_records.append({
-        "cluster": cluster_id,
-        "train_samples": n_train_cluster,
-        "validation_samples": n_valid_cluster,
-        "status": "optuna_success",
-        "best_rmse": float(best_rmse),
-        "best_params": json.dumps(best_params, ensure_ascii=False)
-    })
-
-    # 保存每个簇的 Optuna trial 结果
-    trial_df = study.trials_dataframe()
-    trial_df.to_csv(
-        OUTPUT_DIR / f"optuna_trials_cluster_{cluster_id}.csv",
-        index=False,
-        encoding="utf-8-sig"
+    cluster_optuna_records.append(
+        {
+            "cluster": int(cluster_id),
+            "train_samples": int(n_train_cluster),
+            "validation_samples": int(n_valid_cluster),
+            "status": "optuna_success",
+            "best_rmse": float(best_rmse),
+            "best_params": json.dumps(best_params, ensure_ascii=True),
+        }
     )
 
-    # -----------------------------
-    # 使用最优参数重新训练该簇 XGBoost
-    # -----------------------------
+    if SAVE_DETAILED_OUTPUTS:
+        trial_df = study.trials_dataframe()
+        trial_df.to_csv(
+            OUTPUT_DIR / f"optuna_trials_cluster_{cluster_id}.csv",
+            index=False,
+        )
+
     model = create_xgb_model(best_params)
     model.fit(X_c_train, y_c_train)
 
     cluster_models[cluster_id] = model
 
-    # 验证集评估
     valid_pred = model.predict(X_c_valid)
     metrics = calc_metrics(y_c_valid, valid_pred)
 
     record = {
-        "cluster": cluster_id,
-        "train_samples": n_train_cluster,
-        "validation_samples": n_valid_cluster,
-        **metrics
+        "cluster": int(cluster_id),
+        "train_samples": int(n_train_cluster),
+        "validation_samples": int(n_valid_cluster),
+        **metrics,
     }
 
     cluster_metrics_records.append(record)
@@ -721,23 +643,21 @@ cluster_metrics_df = pd.DataFrame(cluster_metrics_records)
 cluster_metrics_df.to_csv(
     OUTPUT_DIR / "cluster_validation_metrics.csv",
     index=False,
-    encoding="utf-8-sig"
 )
 
 cluster_optuna_df = pd.DataFrame(cluster_optuna_records)
 cluster_optuna_df.to_csv(
     OUTPUT_DIR / "cluster_optuna_best_params.csv",
     index=False,
-    encoding="utf-8-sig"
 )
 
 
 # =========================================================
-# 13. TCFM 融合预测函数
+# 14. Cluster-based fusion prediction
 # =========================================================
 def predict_by_cluster_models(X, cluster_labels, cluster_models):
     """
-    每个样本根据所属簇调用对应 XGBoost 子模型预测。
+    Predict each sample using the XGBoost model corresponding to its assigned cluster.
     """
     y_pred = np.zeros(len(X), dtype=float)
 
@@ -753,9 +673,9 @@ def predict_by_cluster_models(X, cluster_labels, cluster_models):
 
 
 # =========================================================
-# 14. 在训练集、验证集、测试集上预测
+# 15. Prediction and evaluation
 # =========================================================
-print("\n开始进行 TCFM-XGBoost 融合预测...")
+print("\nRunning TCFM-XGBoost fusion prediction...")
 
 train_pred = predict_by_cluster_models(X_train, train_cluster_labels, cluster_models)
 valid_pred = predict_by_cluster_models(X_valid, valid_cluster_labels, cluster_models)
@@ -765,58 +685,61 @@ train_metrics = calc_metrics(y_train, train_pred)
 valid_metrics = calc_metrics(y_valid, valid_pred)
 test_metrics = calc_metrics(y_test, test_pred)
 
-print("\n========== TCFM-XGBoost-Optuna 最终结果 ==========")
+print("\n========== Final TCFM-XGBoost-Optuna Results ==========")
 print("Train:", train_metrics)
 print("Validation:", valid_metrics)
 print("Test:", test_metrics)
 
 
 # =========================================================
-# 15. 保存整体评价结果
+# 16. Save overall metrics
 # =========================================================
-overall_metrics_df = pd.DataFrame([
-    {"dataset": "train", **train_metrics},
-    {"dataset": "validation", **valid_metrics},
-    {"dataset": "test", **test_metrics}
-])
+overall_metrics_df = pd.DataFrame(
+    [
+        {"dataset": "train", **train_metrics},
+        {"dataset": "validation", **valid_metrics},
+        {"dataset": "test", **test_metrics},
+    ]
+)
 
 overall_metrics_df.to_csv(
     OUTPUT_DIR / "overall_metrics.csv",
     index=False,
-    encoding="utf-8-sig"
 )
 
 
 # =========================================================
-# 16. 保存测试集预测结果
+# 17. Optional: save test predictions
 # =========================================================
-test_result_df = pd.DataFrame({
-    "y_true": y_test.values,
-    "y_pred": test_pred,
-    "cluster": test_cluster_labels
-})
+if SAVE_DETAILED_OUTPUTS:
+    test_result_df = pd.DataFrame(
+        {
+            "y_true": y_test.values,
+            "y_pred": test_pred,
+            "cluster": test_cluster_labels,
+        }
+    )
 
-if TIME_COL in test_df.columns:
-    test_result_df.insert(0, TIME_COL, test_df[TIME_COL].values)
+    if TIME_COL in test_df.columns:
+        test_result_df.insert(0, TIME_COL, test_df[TIME_COL].values)
 
-test_result_df["abs_error"] = np.abs(test_result_df["y_true"] - test_result_df["y_pred"])
-test_result_df["ape"] = test_result_df["abs_error"] / (np.abs(test_result_df["y_true"]) + 1)
+    test_result_df["abs_error"] = np.abs(test_result_df["y_true"] - test_result_df["y_pred"])
+    test_result_df["ape"] = test_result_df["abs_error"] / (np.abs(test_result_df["y_true"]) + 1)
 
-test_result_df.to_csv(
-    OUTPUT_DIR / "test_predictions.csv",
-    index=False,
-    encoding="utf-8-sig"
-)
+    test_result_df.to_csv(
+        OUTPUT_DIR / "test_predictions.csv",
+        index=False,
+    )
 
 
 # =========================================================
-# 17. 保存模型和参数
+# 18. Save models and configuration
 # =========================================================
 joblib.dump(ts_scaler, OUTPUT_DIR / f"timeseries_scaler_{CLUSTER_METRIC}.pkl")
 joblib.dump(final_kmeans, OUTPUT_DIR / f"timeseries_kmeans_{CLUSTER_METRIC}.pkl")
-joblib.dump(cluster_models, OUTPUT_DIR / "cluster_xgb_models.pkl")
-joblib.dump(global_model, OUTPUT_DIR / "global_xgb_model.pkl")
-joblib.dump(cluster_best_params, OUTPUT_DIR / "cluster_xgb_best_params.pkl")
+joblib.dump(cluster_models, OUTPUT_DIR / "cluster_xgboost_models.pkl")
+joblib.dump(global_model, OUTPUT_DIR / "global_xgboost_model.pkl")
+joblib.dump(cluster_best_params, OUTPUT_DIR / "cluster_xgboost_best_params.pkl")
 
 config = {
     "target_col": TARGET_COL,
@@ -825,35 +748,20 @@ config = {
     "best_dbi": float(best_record["DBI"]),
     "cluster_metric": CLUSTER_METRIC,
     "cluster_model": "TimeSeriesKMeans",
-    "cluster_cols": cluster_cols,
-    "feature_cols": X_train.columns.tolist(),
-    "k_search_range": [K_MIN, K_MAX],
-    "min_cluster_samples": MIN_CLUSTER_SAMPLES,
+    "cluster_feature_prefix": CLUSTER_FEATURE_PREFIX,
+    "num_cluster_features": int(len(cluster_cols)),
+    "num_prediction_features": int(X_train.shape[1]),
+    "k_search_range": [int(K_MIN), int(K_MAX)],
+    "min_cluster_samples": int(MIN_CLUSTER_SAMPLES),
     "prediction_model": "XGBRegressor",
-    "optuna_trials": N_TRIALS,
-    "base_xgb_params": BASE_XGB_PARAMS,
-    "xgb_search_space": {
-        "n_estimators": "100 to 800, step 50",
-        "max_depth": "3 to 12",
-        "learning_rate": "0.005 to 0.1, log",
-        "subsample": "0.5 to 1.0",
-        "colsample_bytree": "0.5 to 1.0",
-        "min_child_weight": "1.0 to 20.0",
-        "gamma": "1e-8 to 5.0, log",
-        "reg_alpha": "1e-8 to 10.0, log",
-        "reg_lambda": "1e-8 to 10.0, log"
-    },
-    "model": f"TCFM-{CLUSTER_METRIC}-XGBoost-Optuna",
-    "description": (
-        "Time-series clustering-based fusion forecasting model. "
-        "The clustering stage uses queue_countpassed* features and Euclidean TimeSeriesKMeans. "
-        "The prediction stage uses all valid multi-source features and XGBoost models optimized by Optuna within each cluster."
-    )
+    "optuna_trials": int(N_TRIALS),
+    "save_detailed_outputs": bool(SAVE_DETAILED_OUTPUTS),
+    "base_xgb_params": BASE_XGB_PARAMS
 }
 
 with open(OUTPUT_DIR / "config.json", "w", encoding="utf-8") as f:
-    json.dump(config, f, ensure_ascii=False, indent=4)
+    json.dump(config, f, ensure_ascii=True, indent=4)
 
 
-print("\n所有结果已保存到:")
+print("\nAll results have been saved to:")
 print(OUTPUT_DIR)
