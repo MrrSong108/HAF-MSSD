@@ -5,6 +5,8 @@ import gc
 import json
 import joblib
 import random
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import optuna
@@ -22,19 +24,27 @@ from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     classification_report,
-    balanced_accuracy_score
+    balanced_accuracy_score,
 )
 
+
 # =========================
-# 1. 固定随机种子
+# 1. Basic configuration
 # =========================
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
+CLASSIFICATION_DATA_DIR = Path(
+    os.getenv("CLASSIFICATION_DATA_DIR", "data/processed/classification")
+)
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "outputs/bilstm_classifier"))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
 # =========================
-# 2. GPU 设置
+# 2. GPU configuration
 # =========================
 print("TensorFlow version:", tf.__version__)
 
@@ -43,32 +53,41 @@ if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"检测到 GPU 数量: {len(gpus)}")
-        print("GPU 设备:", gpus)
+        print(f"Number of GPUs detected: {len(gpus)}")
+        print("GPU devices:", gpus)
     except RuntimeError as e:
-        print("GPU 设置失败:", e)
+        print("GPU configuration failed:", e)
 else:
-    print("未检测到 GPU，将使用 CPU 运行。")
-
-# =========================
-# 3. 路径设置
-# =========================
-data_dir = "/root/autodl-tmp/airport_project/data/xiao/traff/predict/lstm"
-
-train_path = os.path.join(data_dir, "classification_train.csv")
-test_path = os.path.join(data_dir, "classification_test.csv")
-validation_path = os.path.join(data_dir, "classification_validation.csv")
-
-save_dir = "/root/autodl-tmp/airport_project/data/xiao/traff/class/bilstm"
-os.makedirs(save_dir, exist_ok=True)
+    print("No GPU detected. Running on CPU.")
 
 
 # =========================
-# 4. 数据读取
+# 3. Path configuration
+# =========================
+train_path = CLASSIFICATION_DATA_DIR / "classification_train.csv"
+test_path = CLASSIFICATION_DATA_DIR / "classification_test.csv"
+validation_path = CLASSIFICATION_DATA_DIR / "classification_validation.csv"
+
+for file_path in [train_path, test_path, validation_path]:
+    if not file_path.exists():
+        raise FileNotFoundError(f"Required data file not found: {file_path}")
+
+
+# =========================
+# 4. Data loading
 # =========================
 train = pd.read_csv(train_path)
 test = pd.read_csv(test_path)
 validation = pd.read_csv(validation_path)
+
+required_column = "target"
+for name, dataset in {
+    "train": train,
+    "validation": validation,
+    "test": test,
+}.items():
+    if required_column not in dataset.columns:
+        raise ValueError(f"The '{required_column}' column is missing in the {name} dataset.")
 
 scaler_X = MinMaxScaler()
 
@@ -88,27 +107,27 @@ y_train = train["target"].astype(int).values
 y_test = test["target"].astype(int).values
 y_validation = validation["target"].astype(int).values
 
-# BiLSTM 输入格式：[样本数, 时间步长, 特征数]
-# 当前沿用单时间步输入形式，与 LSTM/GRU 分类实验保持一致
 X_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
 X_test = X_test.reshape(X_test.shape[0], 1, X_test.shape[1])
 X_validation = X_validation.reshape(X_validation.shape[0], 1, X_validation.shape[1])
 
-print("数据已输入")
+print("Data loaded successfully.")
 print("X_train shape:", X_train.shape)
 print("X_validation shape:", X_validation.shape)
 print("X_test shape:", X_test.shape)
 
-print("\n训练集类别分布:")
+print("\nTraining label distribution:")
 print(pd.Series(y_train).value_counts().sort_index())
 
-print("\n验证集类别分布:")
+print("\nValidation label distribution:")
 print(pd.Series(y_validation).value_counts().sort_index())
 
-print("\n测试集类别分布:")
+print("\nTest label distribution:")
 print(pd.Series(y_test).value_counts().sort_index())
 
-# 7. BiLSTM 建模函数
+
+# =========================
+# 5. BiLSTM model construction function
 # =========================
 def build_bilstm_model(
     input_shape,
@@ -117,7 +136,7 @@ def build_bilstm_model(
     dense_units,
     dropout_rate,
     learning_rate,
-    l2_reg
+    l2_reg,
 ):
     model = Sequential()
 
@@ -129,9 +148,9 @@ def build_bilstm_model(
                 recurrent_activation="sigmoid",
                 return_sequences=True,
                 kernel_regularizer=l2(l2_reg),
-                recurrent_regularizer=l2(l2_reg)
+                recurrent_regularizer=l2(l2_reg),
             ),
-            input_shape=input_shape
+            input_shape=input_shape,
         )
     )
     model.add(Dropout(dropout_rate))
@@ -143,7 +162,7 @@ def build_bilstm_model(
                 activation="tanh",
                 recurrent_activation="sigmoid",
                 kernel_regularizer=l2(l2_reg),
-                recurrent_regularizer=l2(l2_reg)
+                recurrent_regularizer=l2(l2_reg),
             )
         )
     )
@@ -153,7 +172,7 @@ def build_bilstm_model(
         Dense(
             dense_units,
             activation="relu",
-            kernel_regularizer=l2(l2_reg)
+            kernel_regularizer=l2(l2_reg),
         )
     )
     model.add(Dropout(dropout_rate))
@@ -165,14 +184,14 @@ def build_bilstm_model(
     model.compile(
         optimizer=optimizer,
         loss="binary_crossentropy",
-        metrics=["accuracy"]
+        metrics=["accuracy"],
     )
 
     return model
 
 
 # =========================
-# 8. Optuna 目标函数
+# 6. Optuna objective function
 # =========================
 def objective(trial):
     K.clear_session()
@@ -202,14 +221,14 @@ def objective(trial):
         dense_units=dense_units,
         dropout_rate=dropout_rate,
         learning_rate=learning_rate,
-        l2_reg=l2_reg
+        l2_reg=l2_reg,
     )
 
     early_stopping = EarlyStopping(
         monitor="val_loss",
         patience=patience,
         restore_best_weights=True,
-        verbose=0
+        verbose=0,
     )
 
     model.fit(
@@ -219,57 +238,57 @@ def objective(trial):
         batch_size=batch_size,
         validation_data=(X_validation, y_validation),
         verbose=0,
-        callbacks=[early_stopping]
+        callbacks=[early_stopping],
     )
 
     y_val_prob = model.predict(
         X_validation,
         batch_size=batch_size,
-        verbose=0
+        verbose=0,
     ).reshape(-1)
 
     y_val_pred = (y_val_prob >= 0.5).astype(int)
 
-    acc = balanced_accuracy_score(y_validation, y_val_pred)
+    balanced_acc = balanced_accuracy_score(y_validation, y_val_pred)
 
     K.clear_session()
     del model
     gc.collect()
 
-    return 1 - acc
+    return 1 - balanced_acc
 
 
 # =========================
-# 9. Optuna 调参
+# 7. Hyperparameter optimization with Optuna
 # =========================
 study_bilstm_cls = optuna.create_study(direction="minimize")
 
 study_bilstm_cls.optimize(
     objective,
     n_trials=50,
-    n_jobs=1
+    n_jobs=1,
 )
 
-print(f"\n最优Accuracy: {1 - study_bilstm_cls.best_value:.4f}")
-print("最佳超参数:")
+print(f"\nBest balanced accuracy: {1 - study_bilstm_cls.best_value:.4f}")
+print("Best hyperparameters:")
 print(study_bilstm_cls.best_params)
 
 
 # =========================
-# 10. 保存最佳参数
+# 8. Save best hyperparameters
 # =========================
 best_params = study_bilstm_cls.best_params
 
 with open(
-    os.path.join(save_dir, "best_bilstm_classifier_params.json"),
+    OUTPUT_DIR / "best_bilstm_classifier_params.json",
     "w",
-    encoding="utf-8"
+    encoding="utf-8",
 ) as f:
-    json.dump(best_params, f, ensure_ascii=False, indent=4)
+    json.dump(best_params, f, ensure_ascii=True, indent=4)
 
 
 # =========================
-# 11. 使用最佳参数训练最终 BiLSTM 模型
+# 9. Train the final BiLSTM classifier with the best hyperparameters
 # =========================
 K.clear_session()
 gc.collect()
@@ -281,14 +300,14 @@ best_model = build_bilstm_model(
     dense_units=best_params["dense_units"],
     dropout_rate=best_params["dropout_rate"],
     learning_rate=best_params["learning_rate"],
-    l2_reg=best_params["l2_reg"]
+    l2_reg=best_params["l2_reg"],
 )
 
 early_stopping = EarlyStopping(
     monitor="val_loss",
     patience=best_params["patience"],
     restore_best_weights=True,
-    verbose=1
+    verbose=1,
 )
 
 history = best_model.fit(
@@ -298,12 +317,12 @@ history = best_model.fit(
     batch_size=best_params["batch_size"],
     validation_data=(X_validation, y_validation),
     verbose=1,
-    callbacks=[early_stopping]
+    callbacks=[early_stopping],
 )
 
 
 # =========================
-# 12. 预测
+# 10. Prediction
 # =========================
 def predict_label(model, X, batch_size):
     prob = model.predict(X, batch_size=batch_size, verbose=0).reshape(-1)
@@ -314,31 +333,32 @@ def predict_label(model, X, batch_size):
 y_train_prob, y_train_pred = predict_label(
     best_model,
     X_train,
-    best_params["batch_size"]
+    best_params["batch_size"],
 )
 
 y_validation_prob, y_validation_pred = predict_label(
     best_model,
     X_validation,
-    best_params["batch_size"]
+    best_params["batch_size"],
 )
 
 y_test_prob, y_test_pred = predict_label(
     best_model,
     X_test,
-    best_params["batch_size"]
+    best_params["batch_size"],
 )
 
 
 # =========================
-# 13. 评估函数
+# 11. Evaluation function
 # =========================
 def evaluate_model(name, y_true, y_pred):
-
     accuracy = accuracy_score(y_true, y_pred)
+    balanced_acc = balanced_accuracy_score(y_true, y_pred)
 
     print(f"\n{name}")
     print(f"Accuracy: {accuracy:.4f}")
+    print(f"Balanced accuracy: {balanced_acc:.4f}")
 
     print("\nConfusion Matrix:")
     print(confusion_matrix(y_true, y_pred))
@@ -348,7 +368,7 @@ def evaluate_model(name, y_true, y_pred):
 
 
 # =========================
-# 14. 输出评估结果
+# 12. Evaluation output
 # =========================
 evaluate_model("TRAIN", y_train, y_train_pred)
 
@@ -358,15 +378,13 @@ evaluate_model("TEST", y_test, y_test_pred)
 
 
 # =========================
-# 15. 保存模型、scaler、预测结果
+# 13. Save model and scaler
 # =========================
-best_model.save(
-    os.path.join(save_dir, "bilstm_classifier.keras")
-)
+best_model.save(OUTPUT_DIR / "bilstm_classifier.keras")
 
 joblib.dump(
     scaler_X,
-    os.path.join(save_dir, "scaler_X.pkl")
+    OUTPUT_DIR / "scaler_X.pkl",
 )
 
-print("\n模型已保存:", save_dir)
+print("\nModel and scaler saved to:", OUTPUT_DIR)
