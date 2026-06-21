@@ -15,21 +15,10 @@ Version: v1.0.0
 ```
 
 建议运行环境：
-
 ```text
-Python: 3.9 / 3.10
-TensorFlow: 2.x
-Keras: 2.x
-scikit-learn: 1.x
-XGBoost: 2.x
-Optuna: 3.x
-Pandas: 1.x / 2.x
-NumPy: 1.x
-tsfeatures: latest available version
-tslearn: latest available version
-joblib: latest available version
+Python: 3.10
+Main dependencies: numpy, pandas, scikit-learn, xgboost, tensorflow, keras, optuna, tslearn, tsfeatures
 ```
-
 推荐使用 Conda 或虚拟环境管理依赖，避免不同项目之间的包版本冲突。
 
 ---
@@ -49,9 +38,11 @@ joblib: latest available version
     ↓
 根据分类结果进行类别内 KMeans 聚类
     ↓
+保存类别-簇聚类中心
+    ↓
 为每个类别-簇训练独立预测子模型
     ↓
-最终预测：分类 → 聚类 → 子模型预测
+最终预测：分类 → 聚类中心匹配 → 子模型预测
 ```
 
 其中，样本类别通常分为：
@@ -68,17 +59,17 @@ joblib: latest available version
 本项目使用的原始数据按天或按若干天分表存储。每类数据通常包括：
 
 ```text
-queue      安检排队数据
-trafft2    T2 航站楼交通流数据
-trafft3    T3 航站楼交通流数据
-check      安检过检数据
-plane      航班计划数据
+queue              安检排队数据
+trafft2            T2 航站楼交通流数据
+trafft3            T3 航站楼交通流数据
+check              安检过检数据
+plane / flight     航班计划数据
 ```
 
 原始数据建议按如下形式组织：
 
 ```text
-airport_raw_data/
+Data/
     queue/
         20240723/
             queues.xlsx
@@ -155,6 +146,12 @@ conda activate haf_mssd
 然后安装依赖：
 
 ```bash
+pip install -r requirements.txt
+```
+
+如果不使用 requirements.txt，也可以手动安装主要依赖：：
+
+```bash
 pip install pandas numpy scikit-learn xgboost optuna joblib tensorflow tslearn tsfeatures matplotlib openpyxl
 ```
 
@@ -171,10 +168,10 @@ pip install pandas numpy scikit-learn xgboost optuna joblib tensorflow tslearn t
 输入数据包括：
 
 ```text
-queue data
-terminal traffic data
-security check data
-flight schedule data
+queue
+traffic
+check
+flight
 ```
 
 输出数据通常为按天保存的 CSV 文件：
@@ -188,7 +185,7 @@ flight schedule data
 运行示例：
 
 ```bash
-python data_create.py
+python datacreate.py
 ```
 
 该步骤会生成基础特征，包括历史排队统计特征、历史过检统计特征、交通流统计特征、未来航班计划特征、时间索引特征以及未来预测目标列。
@@ -204,13 +201,13 @@ python data_create.py
 运行示例：
 
 ```bash
-python statistical_feature_create.py
+python datacreate_tsfeatures.py
 ```
 
 输出结果为：
 
 ```text
-statistical_features/
+tsfeatures/
     20241025.csv
     20241026.csv
     ...
@@ -256,7 +253,7 @@ label = 1: friendly sample
 运行示例：
 
 ```bash
-python train_initial_regressor.py
+python Code/Predict/modelname_predict.py
 ```
 
 输出结果通常包括：
@@ -289,7 +286,7 @@ BiLSTM
 运行示例：
 
 ```bash
-python train_classifier.py
+python Code/Classification/modelname_classifier.py
 ```
 
 输出结果通常包括：
@@ -311,7 +308,7 @@ classification metrics
 运行示例：
 
 ```bash
-python search_dbi.py
+python Code/DBI_Search.py
 ```
 
 输出结果通常包括：
@@ -334,7 +331,7 @@ DBI 越小，通常表示聚类效果越好。
 运行示例：
 
 ```bash
-python kmeans_classification.py
+python Code/Kmeans_Classification.py
 ```
 
 该脚本会：
@@ -363,7 +360,34 @@ class_1_friendly/
 
 ---
 
-### 6.8 训练簇级预测子模型
+### 6.8 保存聚类中心
+
+在完成类别内 KMeans 聚类后，可以运行 cluster_center.py 保存各类别下不同簇的聚类中心。该步骤的作用是将已经形成的类别-簇结构固化下来，便于最终预测阶段直接调用聚类中心进行样本匹配或中心距离比对。
+
+运行示例：
+
+```bash
+python Code/cluster_center.py
+
+该脚本会读取类别内聚类后得到的簇级数据，并根据每个类别和簇计算对应的中心向量。输出结果通常包括：
+
+```text
+cluster_centers.pkl
+cluster_centers_meta.json
+```
+
+其中：
+
+cluster_centers.pkl       保存不同 class-cluster 对应的聚类中心
+cluster_centers_meta.json 保存聚类中心的基本元信息，例如类别、簇编号、样本数量和特征数量
+
+保存聚类中心后，最终预测阶段可以根据新样本所属类别，直接与该类别下的聚类中心进行距离计算，从而确定最接近的簇，并调用对应的簇级预测子模型。这一步可以避免在预测阶段重新计算聚类中心，保证训练阶段和预测阶段使用一致的簇划分依据。
+
+需要注意，聚类中心是基于训练数据统计得到的，包含一定的数据分布信息。因此，cluster_centers.pkl 和 cluster_centers_meta.json 不建议上传到公开 GitHub 仓库。如果需要公开代码，可以只保留 cluster_center.py 脚本，而将实际生成的聚类中心文件保存在本地或服务器环境中。
+
+---
+
+### 6.9 训练簇级预测子模型
 
 对每个类别-簇分别训练预测模型。每个簇都使用独立的 train、validation 和 test 文件。
 
@@ -389,12 +413,7 @@ BiLSTM
 运行示例：
 
 ```bash
-python train_cluster_rf.py
-python train_cluster_xgboost.py
-python train_cluster_cnn.py
-python train_cluster_lstm.py
-python train_cluster_gru.py
-python train_cluster_bilstm.py
+python Code/Cluster_training/modelname_cluster.py
 ```
 
 每个模型会输出：
@@ -409,7 +428,8 @@ metrics.csv
 
 ---
 
-### 6.9 最终预测
+
+### 6.10 最终预测
 
 最终预测流程为：
 
@@ -418,7 +438,9 @@ metrics.csv
     ↓
 使用分类器预测样本类别
     ↓
-根据类别调用对应 KMeans 模型分配簇
+根据预测类别读取对应类别下的聚类中心
+    ↓
+计算样本与各聚类中心的距离，并确定最接近的簇
     ↓
 根据 class + cluster 调用对应簇级子模型
     ↓
@@ -428,7 +450,7 @@ metrics.csv
 运行示例：
 
 ```bash
-python final_prediction.py
+python Code/Final_Predict.py
 ```
 
 如果输入数据中包含真实目标列，脚本会自动计算：
@@ -454,6 +476,12 @@ scaler_X.pkl
 scaler_y.pkl
 best_params.json
 metrics.csv
+cluster_centers.pkl
+cluster_centers_meta.json
+kmeans_label0.pkl
+kmeans_label1.pkl
+cluster_scaler_label0.pkl
+cluster_scaler_label1.pkl
 cluster_rf.csv
 cluster_xgboost.csv
 cluster_cnn.csv
@@ -464,94 +492,9 @@ final_prediction_result.csv
 final_prediction_metrics.json
 ```
 
-其中，以下文件可能包含真实数据、预测值、时间信息或模型训练分布，不建议上传 GitHub：
-
-```text
-*.csv
-*.pkl
-*.joblib
-*.keras
-*.h5
-outputs/
-results/
-models/
-checkpoints/
-```
-
-建议在 `.gitignore` 中加入：
-
-```gitignore
-*.csv
-*.pkl
-*.joblib
-*.keras
-*.h5
-outputs/
-results/
-models/
-checkpoints/
-raw_data/
-processed_data/
-```
-
 ---
 
-## 8. 注意事项
-
-1. validation 和 test 必须严格分开，不能使用同一个文件。
-2. scaler 只能在 train 数据上拟合，然后用于 validation 和 test。
-3. KMeans 只能在 train 数据上 fit，validation 和 test 只能使用训练好的 KMeans 进行簇分配。
-4. 簇级预测子模型中，test 数据只能用于最终评价，不能参与调参。
-5. 公开 GitHub 仓库时，不要上传原始数据、处理后数据、模型文件、预测结果和真实本地路径。
-6. 如果使用深度学习模型进行 Optuna 调参，建议 `n_jobs=1`，避免多进程同时占用 GPU 显存导致训练不稳定。
-7. 如果使用 XGBoost GPU 训练，需要根据本地 XGBoost 和 CUDA 环境设置 `device=cuda` 或相关 GPU 参数。
-
----
-
-## 9. 推荐仓库结构
-
-建议 GitHub 仓库结构如下：
-
-```text
-HAF-MSSD/
-    README.md
-    requirements.txt
-    .gitignore
-
-    data_preprocessing/
-        data_create.py
-        statistical_feature_create.py
-
-    classification/
-        train_classifier_rf.py
-        train_classifier_xgboost.py
-        train_classifier_cnn.py
-        train_classifier_lstm.py
-        train_classifier_gru.py
-        train_classifier_bilstm.py
-
-    clustering/
-        search_dbi.py
-        kmeans_classification.py
-        calculate_cluster_centers.py
-
-    cluster_models/
-        train_cluster_rf.py
-        train_cluster_xgboost.py
-        train_cluster_cnn.py
-        train_cluster_lstm.py
-        train_cluster_gru.py
-        train_cluster_bilstm.py
-
-    prediction/
-        final_prediction.py
-```
-
-数据、模型和输出结果建议保存在仓库外部，或通过 `.gitignore` 排除。
-
----
-
-## 10. 说明
+## 8. 说明
 
 本项目代码用于学术研究和实验复现。由于不同机场、不同时间段和不同数据系统的数据格式可能存在差异，运行前需要根据自己的数据字段、日期范围和路径结构进行适配。
 
