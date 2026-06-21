@@ -149,7 +149,7 @@ conda activate haf_mssd
 pip install -r requirements.txt
 ```
 
-如果不使用 requirements.txt，也可以手动安装主要依赖：：
+如果不使用 requirements.txt，也可以手动安装主要依赖：
 
 ```bash
 pip install pandas numpy scikit-learn xgboost optuna joblib tensorflow tslearn tsfeatures matplotlib openpyxl
@@ -368,6 +368,7 @@ class_1_friendly/
 
 ```bash
 python Code/cluster_center.py
+```
 
 该脚本会读取类别内聚类后得到的簇级数据，并根据每个类别和簇计算对应的中心向量。输出结果通常包括：
 
