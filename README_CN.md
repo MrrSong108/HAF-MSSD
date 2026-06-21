@@ -149,7 +149,7 @@ conda activate haf_mssd
 pip install -r requirements.txt
 ```
 
-如果不使用 requirements.txt，也可以手动安装主要依赖：：
+如果不使用 requirements.txt，也可以手动安装主要依赖：
 
 ```bash
 pip install pandas numpy scikit-learn xgboost optuna joblib tensorflow tslearn tsfeatures matplotlib openpyxl
