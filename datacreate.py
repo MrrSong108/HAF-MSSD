@@ -1,11 +1,33 @@
-import pdb
+import os
 import time
 import pandas as pd
+from pathlib import Path
 from datetime import datetime, timedelta
 import numpy as np
 import warnings
-warnings.filterwarnings("ignore", message="DataFrame.mean and DataFrame.median with numeric_only=None")
 
+warnings.filterwarnings(
+    "ignore",
+    message="DataFrame.mean and DataFrame.median with numeric_only=None"
+)
+
+# =========================
+# 1. Basic path configuration
+# =========================
+# Please change RAW_DATA_ROOT to your own raw data directory.
+# Do not upload the real raw data path to GitHub.
+
+RAW_DATA_ROOT = Path(os.getenv(
+    "RAW_DATA_ROOT",
+    r"airport_raw_data"
+))
+
+OUTPUT_DIR = Path(os.getenv(
+    "OUTPUT_DIR",
+    r"airport_processed_data"
+))
+
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 start_date = datetime(2024, 7, 23)
 end_date = datetime(2024,7, 24)
 stemp_date = start_date
@@ -15,209 +37,203 @@ addhour = timedelta(hours=23)
 current_date = start_date
 
 def get_file_path(current_date):
+    """
+    Return the raw data file paths for a given date.
+
+    The raw data are organized by source:
+    - queue: usually one table per day
+    - trafft2 / trafft3: usually one table every few days
+    - check: usually one table every few days
+    - plane: usually one table every several days
+
+    Please modify the relative paths according to your own data folder structure.
+    """
+
+    date_str = current_date.strftime("%Y%m%d")
+
+    # =========================
+    # 1. Queue data path
+    # =========================
     if datetime(2024, 5, 15) <= current_date < datetime(2024, 7, 2):
-        queue_path = f"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\\0515-0701\队列export0702\\{current_date.strftime('%Y%m%d')}\queues.xlsx"
+        queue_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "queue"
+            / date_str
+            / "queues.xlsx"
+        )
+
     elif datetime(2024, 7, 2) <= current_date < datetime(2024, 8, 15):
-        queue_path = f"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\\0702-0815\队列export\\{current_date.strftime('%Y%m%d')}\queues.xlsx"
+        queue_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "queue"
+            / date_str
+            / "queues.xlsx"
+        )
 
-    if datetime(2024, 7, 2) <= current_date < datetime(2024, 7, 5):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\705.xlsx"
-    elif datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 18):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\515-518.xlsx"
-    elif datetime(2024, 5, 18) <= current_date < datetime(2024, 5, 21):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\518-521.xlsx"
-    elif datetime(2024, 5, 21) <= current_date < datetime(2024, 5, 24):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\521-524.xlsx"
-    elif datetime(2024, 5, 24) <= current_date < datetime(2024, 5, 27):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\524-527.xlsx"
-    elif datetime(2024, 5, 27) <= current_date < datetime(2024, 5, 30):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\527-530.xlsx"
-    elif datetime(2024, 5, 30) <= current_date < datetime(2024, 6, 2):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\530-602.xlsx"
-    elif datetime(2024, 6, 2) <= current_date < datetime(2024, 6, 5):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\602-605.xlsx"
-    elif datetime(2024, 6, 5) <= current_date < datetime(2024, 6, 8):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\605-608.xlsx"
-    elif datetime(2024, 6, 8) <= current_date < datetime(2024, 6, 11):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\608+.xlsx"
-    elif datetime(2024, 6, 11) <= current_date < datetime(2024, 6, 14):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\611+.xlsx"
-    elif datetime(2024, 6, 14) <= current_date < datetime(2024, 6, 17):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\614+.xlsx"
-    elif datetime(2024, 6, 17) <= current_date < datetime(2024, 6, 20):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\617+.xlsx"
-    elif datetime(2024, 6, 20) <= current_date < datetime(2024, 6, 23):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\620+.xlsx"
-    elif datetime(2024, 6, 23) <= current_date < datetime(2024, 6, 26):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\623+.xlsx"
-    elif datetime(2024, 6, 26) <= current_date < datetime(2024, 6, 29):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\626+.xlsx"
-    elif datetime(2024, 6, 29) <= current_date < datetime(2024, 7, 2):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\629+.xlsx"
-    elif datetime(2024, 7, 2) <= current_date < datetime(2024, 7, 5):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\705.xlsx"
-    elif datetime(2024, 7, 5) <= current_date < datetime(2024, 7, 8):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\708.xlsx"
-    elif datetime(2024, 7, 8) <= current_date < datetime(2024, 7, 11):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\711.xlsx"
-    elif datetime(2024, 7, 11) <= current_date < datetime(2024, 7, 14):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\714.xlsx"
-    elif datetime(2024, 7, 14) <= current_date < datetime(2024, 7, 17):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\717.xlsx"
-    elif datetime(2024, 7, 17) <= current_date < datetime(2024, 7, 20):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\720.xlsx"
-    elif datetime(2024, 7, 20) <= current_date < datetime(2024, 7, 23):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\723.xlsx"
-    elif datetime(2024, 7, 23) <= current_date < datetime(2024, 7, 26):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\726.xlsx"
-    elif datetime(2024, 7, 26) <= current_date < datetime(2024, 7, 29):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\729.xlsx"
-    elif datetime(2024, 7, 29) <= current_date < datetime(2024, 8, 1):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\801.xlsx"
-    elif datetime(2024, 8, 1) <= current_date < datetime(2024, 8, 4):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\804.xlsx"
-    elif datetime(2024, 8, 4) <= current_date < datetime(2024, 8, 7):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\807.xlsx"
-    elif datetime(2024, 8, 7) <= current_date < datetime(2024, 8, 10):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\810.xlsx"
-    elif datetime(2024, 8, 10) <= current_date < datetime(2024, 8, 13):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\813.xlsx"
-    elif datetime(2024, 8, 13) <= current_date < datetime(2024, 8, 16):
-        trafft2_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T2\816.xlsx"
     else:
-        print('时间超出T2数据范围')
+        print("Date is outside the queue data range.")
         return None, None, None, None, None
 
-    if datetime(2024, 7, 2) <= current_date < datetime(2024, 7, 5):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\705.xlsx"
-    elif datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 18):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0515+.xlsx"
+
+    # =========================
+    # 2. T2 terminal traffic data path
+    # =========================
+    if datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 18):
+        trafft2_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "trafft2"
+            / "515-518.xlsx"
+        )
+
     elif datetime(2024, 5, 18) <= current_date < datetime(2024, 5, 21):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0518+.xlsx"
-    elif datetime(2024, 5, 21) <= current_date < datetime(2024, 5, 24):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0521+.xlsx"
-    elif datetime(2024, 5, 24) <= current_date < datetime(2024, 5, 27):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0524+.xlsx"
-    elif datetime(2024, 5, 27) <= current_date < datetime(2024, 5, 30):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0527+.xlsx"
-    elif datetime(2024, 5, 30) <= current_date < datetime(2024, 6, 2):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0530+.xlsx"
-    elif datetime(2024, 6, 2) <= current_date < datetime(2024, 6, 5):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0602+.xlsx"
-    elif datetime(2024, 6, 5) <= current_date < datetime(2024, 6, 8):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0605+.xlsx"
-    elif datetime(2024, 6, 8) <= current_date < datetime(2024, 6, 11):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0608+.xlsx"
-    elif datetime(2024, 6, 11) <= current_date < datetime(2024, 6, 14):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0611+.xlsx"
-    elif datetime(2024, 6, 14) <= current_date < datetime(2024, 6, 17):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0614+.xlsx"
-    elif datetime(2024, 6, 17) <= current_date < datetime(2024, 6, 20):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0617+.xlsx"
-    elif datetime(2024, 6, 20) <= current_date < datetime(2024, 6, 23):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0620+.xlsx"
-    elif datetime(2024, 6, 23) <= current_date < datetime(2024, 6, 26):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0623+.xlsx"
-    elif datetime(2024, 6, 26) <= current_date < datetime(2024, 6, 29):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\0626+.xlsx"
-    elif datetime(2024, 6, 29) <= current_date < datetime(2024, 7, 2):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T3\629+.xlsx"
-    elif datetime(2024, 7, 2) <= current_date < datetime(2024, 7, 5):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\705.xlsx"
-    elif datetime(2024, 7, 5) <= current_date < datetime(2024, 7, 8):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\708.xlsx"
-    elif datetime(2024, 7, 8) <= current_date < datetime(2024, 7, 11):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\711.xlsx"
-    elif datetime(2024, 7, 11) <= current_date < datetime(2024, 7, 14):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\714.xlsx"
-    elif datetime(2024, 7, 14) <= current_date < datetime(2024, 7, 17):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\717.xlsx"
-    elif datetime(2024, 7, 17) <= current_date < datetime(2024, 7, 20):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\720.xlsx"
-    elif datetime(2024, 7, 20) <= current_date < datetime(2024, 7, 23):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\723.xlsx"
+        trafft2_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "trafft2"
+            / "518-521.xlsx"
+        )
+
     elif datetime(2024, 7, 23) <= current_date < datetime(2024, 7, 26):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\726.xlsx"
+        trafft2_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "trafft2"
+            / "726.xlsx"
+        )
+
     elif datetime(2024, 7, 26) <= current_date < datetime(2024, 7, 29):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\729.xlsx"
-    elif datetime(2024, 7, 29) <= current_date < datetime(2024, 8, 1):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\801.xlsx"
-    elif datetime(2024, 8, 1) <= current_date < datetime(2024, 8, 4):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\804.xlsx"
-    elif datetime(2024, 8, 4) <= current_date < datetime(2024, 8, 7):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\807.xlsx"
-    elif datetime(2024, 8, 7) <= current_date < datetime(2024, 8, 10):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\810.xlsx"
-    elif datetime(2024, 8, 10) <= current_date < datetime(2024, 8, 13):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\813.xlsx"
-    elif datetime(2024, 8, 13) <= current_date < datetime(2024, 8, 16):
-        trafft3_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\进出客流\T3\816.xlsx"
+        trafft2_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "trafft2"
+            / "729.xlsx"
+        )
+
     else:
-        print('时间超出T3数据范围')
+        print("Date is outside the T2 traffic data range.")
         return None, None, None, None, None
 
-    if datetime(2024, 7, 2) <= current_date <= datetime(2024, 7, 7):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\702-707.xlsx"
-    elif datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 30):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\anjian\515-530.xlsx"
+
+    # =========================
+    # 3. T3 terminal traffic data path
+    # =========================
+    if datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 18):
+        trafft3_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "trafft3"
+            / "0515+.xlsx"
+        )
+
+    elif datetime(2024, 5, 18) <= current_date < datetime(2024, 5, 21):
+        trafft3_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "trafft3"
+            / "0518+.xlsx"
+        )
+
+    elif datetime(2024, 7, 23) <= current_date < datetime(2024, 7, 26):
+        trafft3_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "trafft3"
+            / "726.xlsx"
+        )
+
+    elif datetime(2024, 7, 26) <= current_date < datetime(2024, 7, 29):
+        trafft3_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "trafft3"
+            / "729.xlsx"
+        )
+
+    else:
+        print("Date is outside the T3 traffic data range.")
+        return None, None, None, None, None
+
+
+    # =========================
+    # 4. Security check data path
+    # =========================
+    if datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 30):
+        check_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "check"
+            / "515-530.xlsx"
+        )
+
     elif datetime(2024, 5, 30) <= current_date < datetime(2024, 6, 15):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\anjian\530-615.xlsx"
-    elif datetime(2024, 6, 15) <= current_date < datetime(2024, 6, 30):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\anjian\615-630.xlsx"
-    elif datetime(2024, 6, 30) <= current_date < datetime(2024, 7, 2):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\anjian\安检 0630-0702.xlsx"
-    elif datetime(2024, 6, 29) <= current_date < datetime(2024, 7, 2):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\航站楼进出\T2\629+.xlsx"
-    elif datetime(2024, 7, 2) <= current_date < datetime(2024, 7, 8):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\702-707.xlsx"
-    elif datetime(2024, 7, 8) <= current_date < datetime(2024, 7, 14):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\708-713.xlsx"
-    elif datetime(2024, 7, 14) <= current_date < datetime(2024, 7, 20):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\714-719.xlsx"
+        check_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "check"
+            / "530-615.xlsx"
+        )
+
     elif datetime(2024, 7, 20) <= current_date < datetime(2024, 7, 26):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\720-725.xlsx"
+        check_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "check"
+            / "720-725.xlsx"
+        )
+
     elif datetime(2024, 7, 26) <= current_date < datetime(2024, 8, 1):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\726-731.xlsx"
-    elif datetime(2024, 8, 1) <= current_date < datetime(2024, 8, 7):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\801-806.xlsx"
-    elif datetime(2024, 8, 7) <= current_date < datetime(2024, 8, 13):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\807-812.xlsx"
-    elif datetime(2024, 8, 13) <= current_date < datetime(2024, 8, 19):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\813-818.xlsx"
-    elif datetime(2024, 8, 19) <= current_date < datetime(2024, 8, 25):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\819-824.xlsx"
-    elif datetime(2024, 8, 25) <= current_date < datetime(2024, 8, 29):
-        check_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\安检数据\825-828.xlsx"
+        check_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "check"
+            / "726-731.xlsx"
+        )
+
     else:
-        print('时间超出安检数据范围')
+        print("Date is outside the security check data range.")
         return None, None, None, None, None
 
-    if datetime(2024, 7, 2) <= current_date <= datetime(2024, 7, 16):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\航班\702-716.xlsx"
-    elif datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 22):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\hangban\515-522.xlsx"
+
+    # =========================
+    # 5. Flight data path
+    # =========================
+    if datetime(2024, 5, 15) <= current_date < datetime(2024, 5, 22):
+        plane_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "flight"
+            / "515-522.xlsx"
+        )
+
     elif datetime(2024, 5, 22) <= current_date < datetime(2024, 5, 29):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\hangban\522-529.xlsx"
-    elif datetime(2024, 5, 29) <= current_date < datetime(2024, 6, 5):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\hangban\529-605.xlsx"
-    elif datetime(2024, 6, 5) <= current_date < datetime(2024, 6, 12):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\\hangban\605-612.xlsx"
-    elif datetime(2024, 6, 12) <= current_date < datetime(2024, 6, 19):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\\hangban\612-619.xlsx"
-    elif datetime(2024, 6, 19) <= current_date < datetime(2024, 6, 26):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\\hangban\619-626.xlsx"
-    elif datetime(2024, 6, 26) <= current_date < datetime(2024, 7, 2):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0515-0701\\hangban\626-702.xlsx"
-    elif datetime(2024, 7, 2) <= current_date < datetime(2024, 7, 17):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\航班\702-716.xlsx"
+        plane_path = (
+            RAW_DATA_ROOT
+            / "0515-0701"
+            / "flight"
+            / "522-529.xlsx"
+        )
+
     elif datetime(2024, 7, 17) <= current_date < datetime(2024, 8, 1):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\航班\716-730.xlsx"
+        plane_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "flight"
+            / "716-730.xlsx"
+        )
+
     elif datetime(2024, 8, 1) <= current_date < datetime(2024, 8, 19):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\航班\730-818.xlsx"
-    elif datetime(2024, 8, 19) <= current_date < datetime(2024, 8, 29):
-        plane_path = r"D:\真能毕业吗\机场客流量\机场客流量预测投稿\原数据\0702-0815\航班\818-828.xlsx"
+        plane_path = (
+            RAW_DATA_ROOT
+            / "0702-0815"
+            / "flight"
+            / "730-818.xlsx"
+        )
+
     else:
-        print('时间超出航班数据范围')
+        print("Date is outside the flight data range.")
         return None, None, None, None, None
 
     return queue_path, trafft2_path, trafft3_path, check_path, plane_path
@@ -460,19 +476,22 @@ while stemp_date <= end_date:
     trafft3 = pd.DataFrame()
     check = pd.DataFrame()
     plane = pd.DataFrame()
-    print('构建日期：', stemp_date.strftime('%Y%m%d'), '\n正在输入数据：')
+    print("Building date:", stemp_date.strftime("%Y%m%d"), "\nLoading raw data...")
     if stemp_date >= (end_date - timedelta(days=1)):
         for i in range(3):
             queue_path, trafft2_path, trafft3_path, check_path, plane_path = get_file_path(stemp_date - timedelta(days=1) + timedelta(days=i))
             print((stemp_date - timedelta(days=1) + timedelta(days=i)).strftime('%Y%m%d'))
+            if queue_path is None:
+                print("Missing file path. Skip current date.")
+                continue
             print(queue_path, '\n', trafft2_path, '\n', trafft3_path, '\n', check_path, '\n', plane_path)
-            # 加载 Excel 文件并拼接数据
+            # Load Excel files and concatenate data.
             queue_df = pd.read_excel(queue_path)
             trafft2_df = pd.read_excel(trafft2_path)
             trafft3_df = pd.read_excel(trafft3_path)
             check_df = pd.read_excel(check_path)
             plane_df = pd.read_excel(plane_path)
-            # 将四个 DataFrame 拼接起来
+            # Concatenate all raw data tables.
             queue = pd.concat([queue, queue_df], ignore_index=True)
             trafft2 = pd.concat([trafft2, trafft2_df], ignore_index=True)
             trafft3 = pd.concat([trafft3, trafft3_df], ignore_index=True)
@@ -483,32 +502,33 @@ while stemp_date <= end_date:
             queue_path, trafft2_path, trafft3_path, check_path, plane_path = get_file_path(stemp_date - timedelta(days=1) + timedelta(days=i))
             print((stemp_date - timedelta(days=1) + timedelta(days=i)).strftime('%Y%m%d'))
             print(queue_path, '\n', trafft2_path, '\n', trafft3_path, '\n', check_path, '\n', plane_path)
-            # 加载 Excel 文件并拼接数据
+            # Load Excel files and concatenate data.
             queue_df = pd.read_excel(queue_path)
             trafft2_df = pd.read_excel(trafft2_path)
             trafft3_df = pd.read_excel(trafft3_path)
             check_df = pd.read_excel(check_path)
             plane_df = pd.read_excel(plane_path)
-            # 将四个 DataFrame 拼接起来
+            # Concatenate all raw data tables.
             queue = pd.concat([queue, queue_df])
             trafft2 = pd.concat([trafft2, trafft2_df])
             trafft3 = pd.concat([trafft3, trafft3_df])
             check = pd.concat([check, check_df])
             plane = pd.concat([plane, plane_df])
-    print('数据已全部输入，用时：', time.time()-count_time)
+    print("All raw data loaded. Runtime:", time.time() - count_time)
     count_time = time.time()
     queue['date'] = pd.to_datetime(queue['date'])
-    # 计算到达安检口的时间
+
+    # Calculate the estimated queue arrival time.
     qd = queue.copy()
     qd['time'] = qd['date'] - pd.to_timedelta(qd['wait_time'], unit='s')
-    ##值机数据时间处理
-    # 将 'check_time' 列转换为 datetime 类型
+
+    # Process security check data time fields.
     cd = check.copy()
     cd['check_time'] = pd.to_datetime(cd['check_time'])
     cd['time'] = cd['check_time']
     cd = cd[cd['security_check_point'].str.contains('DC', na=False)]
-    ##交通数据时间处理
-    # 将 'check_time' 列转换为 datetime 类型
+
+    # Process terminal traffic data time fields.
     trafft2['time'] = pd.to_datetime(trafft2['time'])
     trafft3['time'] = pd.to_datetime(trafft3['time'])
     plane_data = plane.copy()
@@ -518,7 +538,7 @@ while stemp_date <= end_date:
     trafft2 = trafft2.drop_duplicates().fillna(0)
     trafft3 = trafft3.drop_duplicates().fillna(0)
     plane_data = plane_data.drop_duplicates().fillna(0)
-    print('时间范围:',min(cd['time']), '-', max(cd['time']))
+    print("Available check data time range:", min(cd["time"]), "-", max(cd["time"]))
     while stemp_time <= (stemp_date + timedelta(days=1) - timedelta(minutes=1)):
         stemp_count = time.time()
         time_deltas = [
@@ -551,11 +571,11 @@ while stemp_date <= end_date:
             (stemp_time - timedelta(minutes=35) < qd['date']) & (qd['date'] < stemp_time - timedelta(minutes=34))]
         stemp_waitpassed40 = qd[
             (stemp_time - timedelta(minutes=40) < qd['date']) & (qd['date'] < stemp_time - timedelta(minutes=39))]
-        ##进入排队时间
+
         # [T ~ T+30 min]
         stemp_countdata = qd[(stemp_time < qd['time']) & (qd['time'] < (stemp_time + addminutes))]
-        # [T-n min ~ T]
 
+        # [T-n min ~ T]
         for i in range(1, 25):
             if i <= 2:
                 for label, delta in time_deltas:
@@ -565,14 +585,12 @@ while stemp_date <= end_date:
                 stemp_queuedatapassed[f'{i}h'] = qd[(stemp_time - timedelta(hours=i) < qd['time']) &
                                                            (qd['time'] < stemp_time - timedelta(hours=i - 1))]
 
-        ##过闸机时间
         for i in range(1, 25):
             if i <= 2:
                 for label, delta in time_deltas:
                     stemp_checkdatas[label] = cd[
                         (stemp_time - delta < cd['time']) & (cd['time'] < stemp_time)]
             else:
-                # 对应3小时到24小时的时间窗口
                 stemp_checkdatas[f'{i}h'] = cd[(stemp_time - timedelta(hours=i) < cd['time']) &
                                                     (cd['time'] < stemp_time - timedelta(hours=i - 1))]
 
@@ -603,14 +621,12 @@ while stemp_date <= end_date:
         stemp_predict23 = cd[(stemp_time + timedelta(hours=22) <= cd['time']) & (cd['time'] < stemp_time + timedelta(hours=23))]
         stemp_predict24 = cd[(stemp_time + timedelta(hours=23) <= cd['time']) & (cd['time'] < stemp_time + timedelta(hours=24))]
 
-        ##过航站楼
         for i in range(1, 25):
             if i <= 2:
                 for label, delta in time_deltas:
                     stemp_trafft2datapassed[label] = trafft2[
                         (stemp_time - delta < trafft2['time']) & (trafft2['time'] < stemp_time)]
             else:
-                # 对应3小时到24小时的时间窗口
                 stemp_trafft2datapassed[f'{i}h'] = trafft2[(stemp_time - timedelta(hours=i) < trafft2['time']) &
                                                            (trafft2['time'] < stemp_time - timedelta(hours=i - 1))]
 
@@ -620,21 +636,13 @@ while stemp_date <= end_date:
                     stemp_trafft3datapassed[label] = trafft3[
                         (stemp_time - delta < trafft3['time']) & (trafft3['time'] < stemp_time)]
             else:
-                # 对应3小时到24小时的时间窗口
                 stemp_trafft3datapassed[f'{i}h'] = trafft3[(stemp_time - timedelta(hours=i) < trafft3['time']) &
                     (trafft3['time'] < stemp_time - timedelta(hours=i - 1))]
 
-        ##航班数据
         plane_deltas = [
             ('30', timedelta(minutes=30)), ('60', timedelta(minutes=60)),
             ('90', timedelta(minutes=90)), ('120', timedelta(minutes=120))]
         time_intervals = [30, 60, 90, 120] + [i * 60 for i in range(2, 13)]
-        # for i, minutes in enumerate(time_intervals):
-        #     start_time = stemp_time + timedelta(minutes=time_intervals[i - 1]) if i > 3 else stemp_time
-        #     end_time = stemp_time + timedelta(minutes=minutes)
-        #     stemp_planes[f'stemp_plane{minutes // 30 if minutes <= 120 else minutes // 60}'] = plane_data[
-        #         (start_time <= plane_data['selected_est_out_at']) &
-        #         (plane_data['selected_est_out_at'] < end_time)]
         for i in range(1, 13):
             if i <= 2:
                 for label, delta in plane_deltas:
@@ -643,7 +651,7 @@ while stemp_date <= end_date:
             else:
                 stemp_planes[f'stemp_plane{i}'] = plane_data[(stemp_time + timedelta(hours=i-1) <= plane_data['selected_est_out_at']) &
                                                  (plane_data['selected_est_out_at'] < stemp_time + timedelta(hours=i))]
-        # 队列平均等待时间
+
         wait_avrs = {}
         for i in range(1, 25):
             if i <= 2:
@@ -665,11 +673,6 @@ while stemp_date <= end_date:
                     wait_avr = 0
                 wait_avrs[f'{i}h'] = wait_avr
 
-        # 安检完成到起飞之间的等待时间
-        #按照flight_no将两表合并
-        # stemp_planedata = plane_data[
-        #     (stemp_time - timedelta(hours=23) < plane_data['selected_est_out_at']) & (
-        #                 plane_data['selected_est_out_at'] < stemp_time + timedelta(hours=23))]  ##合并信息使用，飞机间隔23小时
         selected_planedata = plane_data[['flight_no', 'selected_est_out_at']]
         merged_data = pd.merge_asof(cd.sort_values('check_time'), selected_planedata.sort_values('selected_est_out_at'),
                                     by='flight_no', left_on='check_time', right_on='selected_est_out_at', direction='forward')
@@ -685,7 +688,6 @@ while stemp_date <= end_date:
                                                            (merged_data['check_time'] < stemp_time - timedelta(hours=i-1))]
                 stemp_checkwaits[f'{i}h'] = stemp_checkwaits[f'{i}h'].fillna(stemp_checkwaits[f'{i}h'].mean(numeric_only=True))
 
-        ##返回
         time_windows = ['5', '10', '15', '20', '25', '30', '35', '40', '60', '90', '120',
                         '3h', '4h', '5h', '6h', '7h', '8h', '9h', '10h', '11h', '12h', '13h', '14h',
                         '15h', '16h', '17h', '18h', '19h', '20h', '21h', '22h', '23h', '24h']
@@ -697,7 +699,7 @@ while stemp_date <= end_date:
             planes[f'plane_t3_{times}'] = stemp_planes[f'stemp_plane{times}']['site'].value_counts().get('T3', 0)
             planes[f'plane_num_{times}'] = stemp_planes[f'stemp_plane{times}']['ordered_num'].sum()
         for window in time_windows:
-            # 队列
+            # Queue
             source[f'queue_countpassed{window}'] = len(stemp_queuedatapassed[window]['queue_id'].value_counts())# 队列总数
             source[f'queue_maxpassed{window}'] = stemp_queuedatapassed[window]['queue_id'].value_counts().max()# 队列最多人数
             source[f'queue_minpassed{window}'] = stemp_queuedatapassed[window]['queue_id'].value_counts().min()#队列最少人数
@@ -705,7 +707,7 @@ while stemp_date <= end_date:
             source[f'wait_max{window}'] = stemp_queuedatapassed[window]['wait_time'].value_counts().index.max()# 安检等待最长时间
             source[f'wait_min{window}'] = stemp_queuedatapassed[window]['wait_time'].value_counts().index.min()# 安检等待最短时间
             source[f'wait_avr{window}'] = wait_avrs[window]# 安检平均等待时间
-            # 安检
+            # Check
             source[f'check_countpassed{window}'] = len(stemp_checkdatas[window])
             source[f'check_T2passed{window}'] = len(stemp_checkdatas[window][stemp_checkdatas[window]['security_check_point'].str.contains('T2', na=False)])
             source[f'check_T3passed{window}'] = len(stemp_checkdatas[window]) - len(stemp_checkdatas[window][stemp_checkdatas[window]['security_check_point'].str.contains('T2', na=False)])
@@ -715,7 +717,7 @@ while stemp_date <= end_date:
             source[f'check_waitmax{window}'] = stemp_checkwaits[window]['wait_time'].max().total_seconds()
             source[f'check_waitmin{window}'] = stemp_checkwaits[window]['wait_time'].min().total_seconds()
             source[f'check_waitavr{window}'] = stemp_checkwaits[window]['wait_time'].mean().total_seconds()
-            # 楼前交通
+            # Traff
             source[f'traff_t2enterpassed{window}'] = stemp_trafft2datapassed[window]['enter'].sum()
             source[f'traff_t2exitpassed{window}'] = stemp_trafft2datapassed[window]['exit'].sum()
             source[f'traff_t3enterpassed{window}'] = stemp_trafft3datapassed[window]['enter'].sum()
@@ -723,7 +725,7 @@ while stemp_date <= end_date:
 
         source_customer.loc[len(source_customer)] = {'start_time': stemp_time,  ##时间
                                                     **source,
-                                                  ##队列
+                                                  ## Queue
                                                   'wait_passed5': (stemp_waitpassed5['person_counts'].value_counts().index *
                                                                    stemp_waitpassed5['person_counts'].value_counts()).sum(),
                                                   'wait_passed10': (stemp_waitpassed10['person_counts'].value_counts().index *
@@ -740,9 +742,9 @@ while stemp_date <= end_date:
                                                                     stemp_waitpassed35['person_counts'].value_counts()).sum(),
                                                   'wait_passed40': (stemp_waitpassed40['person_counts'].value_counts().index *
                                                                     stemp_waitpassed40['person_counts'].value_counts()).sum(),
-                                                  ##航班
+                                                  ## Plane
                                                   **planes,
-                                                  #预测
+                                                  ## Predict
                                                   'predict_T2_0.5':(stemp_predict30['security_check_point'].str.split('-').str[0] == 'T2').sum(),
                                                   'predict_T2_1':(stemp_predict60['security_check_point'].str.split('-').str[0] == 'T2').sum(),
                                                   'predict_T2_1.5':(stemp_predict90['security_check_point'].str.split('-').str[0] == 'T2').sum(),
@@ -801,8 +803,9 @@ while stemp_date <= end_date:
         if stemp_time.strftime('%Y-%m-%d %H:%M') == '2024-07-23 07:39':
             pdb.set_trace()
         stemp_time = stemp_time + timedelta(minutes=1)
-    save_path = f"D:\真能毕业吗\机场客流量\机场客流量预测投稿\正确目标\\{stemp_date.strftime('%Y%m%d')}.csv"
+    save_path = OUTPUT_DIR / f"{stemp_date.strftime('%Y%m%d')}.csv"
     source_customer.to_csv(save_path, index=False)
+    print("Saved processed data to:", save_path)
     save_time = time.time()
-    print(f"{stemp_date.strftime('%Y%m%d')}已保存,运行时间为", save_time-count_time)
+    print(f"{stemp_date.strftime('%Y%m%d')} Saved,Runtime:", save_time-count_time)
     stemp_date = stemp_date + timedelta(days=1)
